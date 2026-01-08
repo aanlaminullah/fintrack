@@ -14,24 +14,18 @@ class TransactionRepositoryImpl implements TransactionRepository {
   Future<Either<Failure, List<Transaction>>> getTransactions() async {
     try {
       final db = await databaseHelper.database;
-
-      // RAW SQL JOIN: Menggabungkan transaksi dengan info kategori
-      // Kita gunakan alias (AS) agar sesuai dengan logic fromJson di TransactionModel
       final result = await db.rawQuery('''
-        SELECT 
-          t.id, t.title, t.amount, t.date, t.note, t.type, t.category_id,
-          c.name as category_name, 
-          c.icon as category_icon, 
-          c.color as category_color, 
-          c.type as category_type
+        SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id,
+               c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type
         FROM transactions t
         LEFT JOIN categories c ON t.category_id = c.id
-        ORDER BY t.date DESC
+        ORDER BY t.date DESC, t.id DESC  
       ''');
 
-      final transactions = result
-          .map((e) => TransactionModel.fromJson(e))
-          .toList();
+      final List<Transaction> transactions = result.map((e) {
+        return TransactionModel.fromMap(e).toEntity();
+      }).toList();
+
       return Right(transactions);
     } catch (e) {
       return Left(DatabaseFailure(e.toString()));

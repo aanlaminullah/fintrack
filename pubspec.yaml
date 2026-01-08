@@ -104,5 +104,5 @@ flutter_launcher_icons:
   min_sdk_android: 21 # Penting agar support android lama
 
   # Khusus Android modern agar background tidak hitam (Adaptive Icon)
-  adaptive_icon_background: "#ffffff" # Atau warna hex background yang Anda mau (misal hijau teal: #009688)
+  adaptive_icon_background: "#009688" # Atau warna hex background yang Anda mau (misal hijau teal: #009688)
   adaptive_icon_foreground: "assets/icon/icon.png"

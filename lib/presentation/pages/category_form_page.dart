@@ -4,6 +4,7 @@ import '../../core/utils/app_icons.dart';
 import '../../domain/entities/category.dart';
 import '../providers/category_provider.dart';
 import '../providers/usecase_providers.dart';
+import 'package:flutter/services.dart';
 
 class CategoryFormPage extends ConsumerStatefulWidget {
   // Parameter opsional untuk mode EDIT
@@ -142,6 +143,7 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
               TextFormField(
                 controller: _nameController,
                 textCapitalization: TextCapitalization.words,
+                inputFormatters: [CapitalizeWordsInputFormatter()],
                 decoration: InputDecoration(
                   labelText: 'Nama Kategori',
                   border: OutlineInputBorder(
@@ -308,5 +310,30 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
         ),
       ),
     );
+  }
+}
+
+class CapitalizeWordsInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) return newValue;
+
+    String text = newValue.text;
+
+    // Logic: Ubah huruf pertama tiap kata jadi kapital
+    String newText = text
+        .split(' ')
+        .map((word) {
+          if (word.isNotEmpty) {
+            return word[0].toUpperCase() + word.substring(1);
+          }
+          return '';
+        })
+        .join(' ');
+
+    return TextEditingValue(text: newText, selection: newValue.selection);
   }
 }
