@@ -12,6 +12,7 @@ import '../widgets/expense_pie_chart.dart';
 import 'add_transaction_page.dart';
 import 'category_list_page.dart';
 import 'transaction_search_page.dart';
+import 'expense_analysis_page.dart';
 
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
@@ -216,7 +217,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       Consumer(
                         builder: (context, ref, child) {
                           ref.watch(transactionListProvider);
-                          return const ExpensePieChart();
+                          return GestureDetector(
+                            onTap: () {
+                              // Navigasi ke Halaman Analisis
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const ExpenseAnalysisPage(),
+                                ),
+                              );
+                            },
+                            child: const ExpensePieChart(),
+                          );
                         },
                       ),
                     ],
