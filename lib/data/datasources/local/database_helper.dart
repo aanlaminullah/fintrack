@@ -119,4 +119,29 @@ class DatabaseHelper {
     final db = await instance.database;
     db.close();
   }
+
+  // FITUR BACKUP: Ambil path file database saat ini
+  Future<String> getDbPath() async {
+    final dbPath = await getDatabasesPath();
+    return join(dbPath, 'fintrack.db');
+  }
+
+  // FITUR RESTORE: Tutup koneksi agar file bisa ditimpa
+  Future<void> closeForRestore() async {
+    final db = _database;
+    if (db != null) {
+      await db.close();
+      _database = null; // Reset instance
+    }
+  }
+
+  // FITUR RESTORE & BACKUP: Tutup koneksi agar file tersimpan sempurna
+  Future<void> closeDatabase() async {
+    final db = _database;
+    if (db != null) {
+      await db.close();
+      _database =
+          null; // Reset instance agar nanti dibuka ulang saat ada query baru
+    }
+  }
 }

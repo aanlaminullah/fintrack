@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../../core/utils/app_icons.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../providers/chart_provider.dart';
 import '../providers/transaction_provider.dart';
@@ -19,18 +18,22 @@ class ExpenseAnalysisPage extends ConsumerStatefulWidget {
 }
 
 class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
-  // State untuk Filter Kategori (null = Tampilkan Semua)
   String? _selectedCategoryName;
-
-  // State untuk Sortir Amount (true = Terbesar ke Terkecil, false = Terkecil ke Terbesar)
   bool _isSortDesc = true;
+  bool _isFirstLoad = true;
 
   @override
   Widget build(BuildContext context) {
-    // 1. Ambil Data Chart (Group by Category)
-    final chartDataAsync = ref.watch(expenseByCategoryProvider);
+    // 1. Ambil Data Chart (Sesuai Bulan Selected)
+    final chartDataAsync = ref.watch(monthlyChartProvider);
 
-    // 2. Ambil Data Semua Transaksi (Untuk List di bawah)
+    // 2. Ambil List Bulan yang Tersedia
+    final availableMonthsAsync = ref.watch(availableMonthsAnalysisProvider);
+
+    // 3. Ambil Tanggal yang Sedang Dipilih
+    final selectedDate = ref.watch(analysisDateProvider);
+
+    // 4. Ambil Semua Transaksi untuk List di Bawah
     final allTransactionsAsync = ref.watch(transactionListProvider);
 
     return Scaffold(
@@ -45,13 +48,84 @@ class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- 1. CHART SECTION (DIPERBAIKI) ---
+            // --- 0. TAB BULAN (MONTH PICKER) ---
+            Container(
+              width: double.infinity,
+              color: Colors.white,
+              padding: const EdgeInsets.only(bottom: 10),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: availableMonthsAsync.when(
+                  data: (months) {
+                    if (months.isEmpty) return const SizedBox.shrink();
+
+                    // Auto select bulan terbaru saat pertama buka
+                    if (_isFirstLoad) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) {
+                          setState(() => _isFirstLoad = false);
+                        }
+                      });
+                    }
+
+                    return Row(
+                      children: months.map((date) {
+                        final isSelected =
+                            date.year == selectedDate.year &&
+                            date.month == selectedDate.month;
+
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: GestureDetector(
+                            onTap: () {
+                              // Update Provider Tanggal (Gunakan method setDate)
+                              ref
+                                  .read(analysisDateProvider.notifier)
+                                  .setDate(date);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? Colors.teal
+                                    : Colors.grey[100],
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                DateFormat('MMM yyyy', 'id_ID').format(date),
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.black87,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                  loading: () => const SizedBox(height: 40),
+                  error: (_, __) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+
+            // --- 1. CHART SECTION ---
             Container(
               color: Colors.white,
               width: double.infinity,
-              height: 300, // <--- PERBAIKAN: WAJIB ADA HEIGHT
+              height: 300,
               padding: const EdgeInsets.only(bottom: 20),
-              child: const ExpensePieChart(),
+              // Pass data dari provider monthlyChartProvider
+              child: ExpensePieChart(chartData: chartDataAsync),
             ),
 
             const SizedBox(height: 10),
@@ -61,9 +135,7 @@ class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
               color: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header Filter
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Row(
@@ -76,14 +148,9 @@ class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
                             fontSize: 16,
                           ),
                         ),
-
-                        // TOMBOL SORT AMOUNT
                         InkWell(
-                          onTap: () {
-                            setState(() {
-                              _isSortDesc = !_isSortDesc;
-                            });
-                          },
+                          onTap: () =>
+                              setState(() => _isSortDesc = !_isSortDesc),
                           borderRadius: BorderRadius.circular(8),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
@@ -98,11 +165,8 @@ class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
                             child: Row(
                               children: [
                                 Icon(
-                                  _isSortDesc
-                                      ? Icons.sort
-                                      : Icons.filter_list, // Icon berubah
+                                  _isSortDesc ? Icons.sort : Icons.filter_list,
                                   size: 16,
-                                  color: Colors.black87,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
@@ -119,38 +183,26 @@ class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 12),
-
-                  // TAB KATEGORI (Horizontal Scroll)
+                  // TAB KATEGORI
                   chartDataAsync.when(
-                    loading: () => const SizedBox(height: 40),
-                    error: (_, __) => const SizedBox.shrink(),
                     data: (data) {
                       if (data.isEmpty) return const SizedBox.shrink();
-
-                      // Kita ambil key map (Format: "Nama|Color")
                       final categoryKeys = data.keys.toList();
-
                       return SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         padding: const EdgeInsets.symmetric(horizontal: 20),
                         child: Row(
                           children: [
-                            // TAB "SEMUA"
                             _buildTabItem(
                               label: 'Semua',
                               isSelected: _selectedCategoryName == null,
                               onTap: () =>
                                   setState(() => _selectedCategoryName = null),
                             ),
-
-                            // TAB KATEGORI LAINNYA
                             ...categoryKeys.map((key) {
                               final split = key.split('|');
                               final name = split[0];
-                              // final color = int.tryParse(split[1]) ?? 0xFF9E9E9E; // Jika butuh warna
-
                               return _buildTabItem(
                                 label: name,
                                 isSelected: _selectedCategoryName == name,
@@ -163,6 +215,8 @@ class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
                         ),
                       );
                     },
+                    loading: () => const SizedBox(height: 40),
+                    error: (_, __) => const SizedBox.shrink(),
                   ),
                 ],
               ),
@@ -170,8 +224,120 @@ class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
 
             const SizedBox(height: 12),
 
-            // --- 3. LIST TRANSAKSI HASIL FILTER ---
+            // --- 3. LIST TRANSAKSI (FILTERED BY DATE & CATEGORY) ---
             allTransactionsAsync.when(
+              data: (transactions) {
+                // FILTER 1: Hanya Expense
+                var filteredList = transactions
+                    .where((t) => t.type == 'expense')
+                    .toList();
+
+                // FILTER 2: Hanya Bulan & Tahun yang Dipilih
+                filteredList = filteredList
+                    .where(
+                      (t) =>
+                          t.date.year == selectedDate.year &&
+                          t.date.month == selectedDate.month,
+                    )
+                    .toList();
+
+                // FILTER 3: Kategori (Jika dipilih)
+                if (_selectedCategoryName != null) {
+                  filteredList = filteredList
+                      .where((t) => t.category?.name == _selectedCategoryName)
+                      .toList();
+                }
+
+                // SORTING
+                filteredList.sort((a, b) {
+                  if (_isSortDesc) return b.amount.compareTo(a.amount);
+                  return a.amount.compareTo(b.amount);
+                });
+
+                // HITUNG TOTAL
+                final int totalFilteredAmount = filteredList.fold(
+                  0,
+                  (sum, item) => sum + item.amount,
+                );
+
+                return Column(
+                  children: [
+                    // TOTAL CARD
+                    if (filteredList.isNotEmpty)
+                      Container(
+                        margin: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.teal.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.teal.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _selectedCategoryName != null
+                                  ? 'Total $_selectedCategoryName'
+                                  : 'Total Pengeluaran',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.teal,
+                              ),
+                            ),
+                            Text(
+                              formatRupiah(totalFilteredAmount),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Colors.teal,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    // LIST ITEMS
+                    if (filteredList.isEmpty)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.only(top: 50),
+                          child: Text(
+                            'Tidak ada pengeluaran di periode ini.',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ),
+                      )
+                    else
+                      ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 10,
+                        ),
+                        itemCount: filteredList.length,
+                        itemBuilder: (context, index) {
+                          final transaction = filteredList[index];
+                          return InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => AddTransactionPage(
+                                    transactionToEdit: transaction,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: TransactionItem(transaction: transaction),
+                          );
+                        },
+                      ),
+                  ],
+                );
+              },
               loading: () => const Center(
                 child: Padding(
                   padding: EdgeInsets.all(20),
@@ -179,68 +345,7 @@ class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
                 ),
               ),
               error: (err, _) => Center(child: Text('Error: $err')),
-              data: (transactions) {
-                // 1. Filter hanya tipe 'expense' (karena ini analisis pengeluaran)
-                var filteredList = transactions
-                    .where((t) => t.type == 'expense')
-                    .toList();
-
-                // 2. Filter berdasarkan Kategori (Jika ada yg dipilih)
-                if (_selectedCategoryName != null) {
-                  filteredList = filteredList
-                      .where((t) => t.category?.name == _selectedCategoryName)
-                      .toList();
-                }
-
-                // 3. Sort berdasarkan Jumlah (Amount)
-                filteredList.sort((a, b) {
-                  if (_isSortDesc) {
-                    return b.amount.compareTo(a.amount); // Besar ke Kecil
-                  } else {
-                    return a.amount.compareTo(b.amount); // Kecil ke Besar
-                  }
-                });
-
-                if (filteredList.isEmpty) {
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.only(top: 50),
-                      child: Text(
-                        'Tidak ada transaksi sesuai filter.',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 10,
-                  ),
-                  itemCount: filteredList.length,
-                  itemBuilder: (context, index) {
-                    final transaction = filteredList[index];
-                    return InkWell(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => AddTransactionPage(
-                              transactionToEdit: transaction,
-                            ),
-                          ),
-                        );
-                      },
-                      child: TransactionItem(transaction: transaction),
-                    );
-                  },
-                );
-              },
             ),
-
             const SizedBox(height: 40),
           ],
         ),
@@ -248,7 +353,6 @@ class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
     );
   }
 
-  // Widget Helper untuk Tab Kapsul (Sama style dengan search page)
   Widget _buildTabItem({
     required String label,
     required bool isSelected,
@@ -261,10 +365,7 @@ class _ExpenseAnalysisPageState extends ConsumerState<ExpenseAnalysisPage> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
           decoration: BoxDecoration(
-            // Warna Hijau Lime jika dipilih, Abu muda jika tidak
-            color: isSelected
-                ? const Color.fromARGB(255, 135, 206, 173)
-                : Colors.grey[200],
+            color: isSelected ? const Color(0xFFD4E157) : Colors.grey[200],
             borderRadius: BorderRadius.circular(24),
             border: isSelected
                 ? Border.all(color: Colors.teal.withOpacity(0.2))

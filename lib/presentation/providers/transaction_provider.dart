@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/transaction.dart';
 import 'usecase_providers.dart';
-import 'chart_provider.dart'; // Import Provider Chart
 
 // --- 1. Provider untuk Dashboard Summary ---
 final dashboardSummaryProvider =
@@ -51,9 +50,10 @@ class TransactionListNotifier extends AsyncNotifier<List<Transaction>> {
       (failure) =>
           state = AsyncValue.error(failure.message, StackTrace.current),
       (success) {
-        ref.invalidateSelf();
-        ref.invalidate(dashboardSummaryProvider);
-        ref.invalidate(expenseByCategoryProvider);
+        ref.invalidateSelf(); // Ini akan otomatis memicu update pada Chart
+        ref.invalidate(
+          dashboardSummaryProvider,
+        ); // Ini tetap perlu karena ambil dari DB
       },
     );
   }
@@ -69,9 +69,10 @@ class TransactionListNotifier extends AsyncNotifier<List<Transaction>> {
       (failure) =>
           state = AsyncValue.error(failure.message, StackTrace.current),
       (success) {
-        ref.invalidateSelf();
-        ref.invalidate(dashboardSummaryProvider);
-        ref.invalidate(expenseByCategoryProvider);
+        ref.invalidateSelf(); // Ini akan otomatis memicu update pada Chart
+        ref.invalidate(
+          dashboardSummaryProvider,
+        ); // Ini tetap perlu karena ambil dari DB
       },
     );
   }
@@ -87,9 +88,10 @@ class TransactionListNotifier extends AsyncNotifier<List<Transaction>> {
       (failure) =>
           state = AsyncValue.error(failure.message, StackTrace.current),
       (success) {
-        ref.invalidateSelf();
-        ref.invalidate(dashboardSummaryProvider);
-        ref.invalidate(expenseByCategoryProvider);
+        ref.invalidateSelf(); // Ini akan otomatis memicu update pada Chart
+        ref.invalidate(
+          dashboardSummaryProvider,
+        ); // Ini tetap perlu karena ambil dari DB
       },
     );
   }

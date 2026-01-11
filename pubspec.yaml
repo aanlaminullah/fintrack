@@ -43,11 +43,18 @@ dependencies:
   equatable: ^2.0.8
   dartz: ^0.10.1
   sqflite_common_ffi_web: ^1.1.1
+  flutter_iconpicker: ^3.2.4
+  file_picker: ^10.3.8 # Untuk memilih file backup saat import
+  share_plus: ^12.0.1 # Untuk membagikan file backup (Export)
+  permission_handler: ^11.1.0 # Untuk izin akses file (Android 10+)
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_launcher_icons: ^0.13.1
+
+dependency_overrides:
+  font_awesome_flutter: 10.6.0
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

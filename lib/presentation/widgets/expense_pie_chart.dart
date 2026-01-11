@@ -1,20 +1,37 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/utils/currency_formatter.dart';
-import '../providers/chart_provider.dart';
 
-class ExpensePieChart extends ConsumerWidget {
-  const ExpensePieChart({super.key});
+class ExpensePieChart extends StatelessWidget {
+  // Terima data dari Parent (Dashboard / Analysis Page)
+  final AsyncValue<Map<String, int>> chartData;
+
+  const ExpensePieChart({super.key, required this.chartData});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final chartDataAsync = ref.watch(expenseByCategoryProvider);
-
-    return chartDataAsync.when(
+  Widget build(BuildContext context) {
+    return chartData.when(
       data: (data) {
         if (data.isEmpty) {
-          return const SizedBox.shrink(); // Jangan tampilkan apa-apa jika belum ada data
+          // Tampilan jika data bulan ini kosong
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.pie_chart_outline,
+                  size: 48,
+                  color: Colors.grey[300],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Belum ada pengeluaran\ndi bulan ini',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[400]),
+                ),
+              ],
+            ),
+          );
         }
 
         return Container(
@@ -34,19 +51,19 @@ class ExpensePieChart extends ConsumerWidget {
               Expanded(
                 child: Row(
                   children: [
-                    // BAGIAN KIRI: Pie Chart
+                    // Pie Chart
                     Expanded(
-                      flex: 6, // Mengambil 60% lebar
+                      flex: 6,
                       child: PieChart(
                         PieChartData(
-                          sectionsSpace: 2, // Jarak antar irisan
-                          centerSpaceRadius: 40, // Bolong di tengah (Donut)
+                          sectionsSpace: 2,
+                          centerSpaceRadius: 40,
                           sections: _generateSections(data),
                         ),
                       ),
                     ),
                     const SizedBox(width: 16),
-                    // BAGIAN KANAN: Keterangan (Legend)
+                    // Legend
                     Expanded(
                       flex: 4,
                       child: Column(
@@ -63,17 +80,15 @@ class ExpensePieChart extends ConsumerWidget {
         );
       },
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Text('Error: $e'),
+      error: (e, _) => Center(child: Text('Error: $e')),
     );
   }
 
-  // Helper: Mengubah data Map menjadi Bagian Chart (Sections)
+  // --- Helpers ---
   List<PieChartSectionData> _generateSections(Map<String, int> data) {
     final total = data.values.fold(0, (sum, item) => sum + item);
-
     return data.entries.map((entry) {
-      final splitKey = entry.key.split('|'); // Pisahkan "Nama|Warna"
-      // final name = splitKey[0];
+      final splitKey = entry.key.split('|');
       final colorInt = int.tryParse(splitKey[1]) ?? 0xFF9E9E9E;
       final value = entry.value;
       final percentage = (value / total * 100).toStringAsFixed(0);
@@ -81,8 +96,8 @@ class ExpensePieChart extends ConsumerWidget {
       return PieChartSectionData(
         color: Color(colorInt),
         value: value.toDouble(),
-        title: '$percentage%', // Tampilkan persentase di dalam chart
-        radius: 40, // Ketebalan donut
+        title: '$percentage%',
+        radius: 40,
         titleStyle: const TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.bold,
@@ -92,11 +107,8 @@ class ExpensePieChart extends ConsumerWidget {
     }).toList();
   }
 
-  // Helper: Membuat Legend (Daftar nama kategori di sebelah kanan)
   List<Widget> _generateLegend(Map<String, int> data) {
-    // Ambil maksimal 4 kategori saja agar tidak overflow
     final limitedData = data.entries.take(4).toList();
-
     return limitedData.map((entry) {
       final splitKey = entry.key.split('|');
       final name = splitKey[0];

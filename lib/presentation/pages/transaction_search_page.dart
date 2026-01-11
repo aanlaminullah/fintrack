@@ -6,6 +6,7 @@ import '../providers/transaction_provider.dart';
 import '../../domain/entities/transaction.dart';
 import '../widgets/transaction_item.dart';
 import 'add_transaction_page.dart';
+import '../../core/utils/currency_formatter.dart'; // <--- 1. TAMBAHAN IMPORT
 
 // 1. Notifier untuk Search Query
 class SearchQueryNotifier extends Notifier<String> {
@@ -105,16 +106,16 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
     );
 
     return Scaffold(
-      backgroundColor: Colors.white, // Ubah jadi putih bersih sesuai referensi
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        foregroundColor: Colors.black, // Icon kembali jadi hitam
+        foregroundColor: Colors.black,
         elevation: 0,
         title: Container(
           height: 40,
           decoration: BoxDecoration(
-            color: Colors.grey[100], // Background search abu sangat muda
-            borderRadius: BorderRadius.circular(20), // Lebih bulat
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(20),
           ),
           child: TextField(
             controller: searchController,
@@ -126,9 +127,8 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
               hintText: 'Cari transaksi...',
               border: InputBorder.none,
               prefixIcon: Icon(Icons.search, color: Colors.grey),
-              contentPadding:
-                  EdgeInsets.zero, // Ganti jadi zero atau biarkan default
-              isDense: true, // Opsional: Memadatkan layout
+              contentPadding: EdgeInsets.zero,
+              isDense: true,
             ),
           ),
         ),
@@ -141,9 +141,7 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
             padding: const EdgeInsets.symmetric(vertical: 10),
             decoration: const BoxDecoration(
               color: Colors.white,
-              border: Border(
-                bottom: BorderSide(color: Colors.black12),
-              ), // Garis tipis di bawah tab
+              border: Border(bottom: BorderSide(color: Colors.black12)),
             ),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -188,19 +186,15 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                                 vertical: 8,
                               ),
                               decoration: BoxDecoration(
-                                // Warna Lime/Kuning cerah jika dipilih, abu muda jika tidak
                                 color: isSelected
                                     ? const Color.fromARGB(255, 135, 206, 173)
                                     : Colors.grey[200],
-                                borderRadius: BorderRadius.circular(
-                                  24,
-                                ), // Bentuk Kapsul
+                                borderRadius: BorderRadius.circular(24),
                               ),
                               child: Text(
-                                // Format Singkat: Jan, Feb, Mar
                                 DateFormat('MMM', 'id_ID').format(date),
                                 style: TextStyle(
-                                  color: Colors.black, // Text selalu hitam
+                                  color: Colors.black,
                                   fontWeight: isSelected
                                       ? FontWeight.bold
                                       : FontWeight.normal,
@@ -250,10 +244,8 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                     // --- LOGIC PEMBATAS TANGGAL ---
                     bool showHeader = false;
                     if (index == 0) {
-                      // Item pertama pasti punya header
                       showHeader = true;
                     } else {
-                      // Cek apakah tanggal item ini BEDA dengan tanggal item sebelumnya
                       final prevDate = transactions[index - 1].date;
                       if (!_isSameDay(transaction.date, prevDate)) {
                         showHeader = true;
@@ -264,31 +256,65 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // TAMPILKAN HEADER TANGGAL
+                        // TAMPILKAN HEADER TANGGAL & TOTAL
                         if (showHeader)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  DateFormat(
-                                    'dd MMMM yyyy',
-                                    'id_ID',
-                                  ).format(transaction.date),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                    color: Colors.black87,
-                                  ),
+                          Builder(
+                            builder: (context) {
+                              // --- 2. HITUNG TOTAL PENGELUARAN HARI INI ---
+                              int totalDailyExpense = transactions
+                                  .where(
+                                    (t) =>
+                                        t.type == 'expense' &&
+                                        _isSameDay(t.date, transaction.date),
+                                  )
+                                  .fold(0, (sum, item) => sum + item.amount);
+
+                              return Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  24,
+                                  20,
+                                  8,
                                 ),
-                                const SizedBox(height: 4),
-                                const Divider(
-                                  height: 1,
-                                  thickness: 0.5,
-                                ), // Garis tipis pembatas
-                              ],
-                            ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // --- 3. UBAH TEXT JADI ROW (Tanggal & Total) ---
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        // TANGGAL (Kiri)
+                                        Text(
+                                          DateFormat(
+                                            'dd MMMM yyyy',
+                                            'id_ID',
+                                          ).format(transaction.date),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
+
+                                        // TOTAL (Kanan) - Hanya tampil jika ada pengeluaran
+                                        if (totalDailyExpense > 0)
+                                          Text(
+                                            formatRupiah(totalDailyExpense),
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    const Divider(height: 1, thickness: 0.5),
+                                  ],
+                                ),
+                              );
+                            },
                           ),
 
                         // ITEM TRANSAKSI (SWIPEABLE)
@@ -298,7 +324,7 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                           background: Container(
                             alignment: Alignment.centerRight,
                             padding: const EdgeInsets.only(right: 20),
-                            color: Colors.red[50], // Merah muda lembut
+                            color: Colors.red[50],
                             child: const Icon(Icons.delete, color: Colors.red),
                           ),
                           confirmDismiss: (direction) async {
@@ -331,7 +357,6 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                                 .deleteTransaction(transaction.id!);
                           },
                           child: InkWell(
-                            // Ganti GestureDetector jadi InkWell biar ada efek klik
                             onTap: () {
                               Navigator.push(
                                 context,
@@ -344,8 +369,7 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                             },
                             child: TransactionItem(
                               transaction: transaction,
-                              // Opsional: Buat TransactionItem lebih flat (tanpa card shadow)
-                              // jika ingin persis seperti gambar
+                              showDate: false,
                             ),
                           ),
                         ),

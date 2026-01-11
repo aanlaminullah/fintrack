@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // Import Providers
 import '../providers/transaction_provider.dart';
 import '../providers/chart_provider.dart';
+import '../providers/category_provider.dart'; // <--- TAMBAHKAN INI
 
 // Import Widgets & Pages
 import '../widgets/summary_card.dart';
@@ -13,6 +14,13 @@ import 'add_transaction_page.dart';
 import 'category_list_page.dart';
 import 'transaction_search_page.dart';
 import 'expense_analysis_page.dart';
+
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import '../../data/datasources/local/database_helper.dart';
 
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
@@ -112,6 +120,28 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       },
                     ),
 
+                    const SizedBox(height: 10),
+                    const Divider(),
+                    const SizedBox(height: 10),
+
+                    // MENU EXPORT
+                    _buildModernMenuItem(
+                      context,
+                      title: 'Backup Data (Export)',
+                      icon: Icons.upload_file,
+                      color: Colors.blue,
+                      onTap: _exportData, // Panggil fungsi export
+                    ),
+
+                    // MENU IMPORT
+                    _buildModernMenuItem(
+                      context,
+                      title: 'Restore Data (Import)',
+                      icon: Icons.download_for_offline,
+                      color: Colors.orange,
+                      onTap: _importData, // Panggil fungsi import
+                    ),
+
                     // Contoh Menu Lain (Disabled / Coming Soon)
                     /*
                     const SizedBox(height: 10),
@@ -160,7 +190,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Halo, User!',
+              'Halo, Aan!',
               style: TextStyle(fontSize: 14, color: Colors.grey),
             ),
             Text(
@@ -182,7 +212,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         onRefresh: () async {
           ref.invalidate(transactionListProvider);
           ref.invalidate(dashboardSummaryProvider);
-          ref.invalidate(expenseByCategoryProvider);
+          ref.invalidate(dashboardChartProvider);
+          ref.invalidate(monthlyChartProvider);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -214,9 +245,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                             const Center(child: CircularProgressIndicator()),
                         error: (err, _) => Center(child: Text('Error: $err')),
                       ),
+                      // HALAMAN 2: PIE CHART
                       Consumer(
                         builder: (context, ref, child) {
-                          ref.watch(transactionListProvider);
+                          // Ambil data chart KHUSUS dashboard (bulan ini)
+                          final chartData = ref.watch(dashboardChartProvider);
+
                           return GestureDetector(
                             onTap: () {
                               // Navigasi ke Halaman Analisis
@@ -227,7 +261,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                                 ),
                               );
                             },
-                            child: const ExpensePieChart(),
+                            // Pass data ke widget
+                            child: ExpensePieChart(chartData: chartData),
                           );
                         },
                       ),
@@ -402,5 +437,129 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         trailing: Icon(Icons.chevron_right, color: Colors.grey[400], size: 20),
       ),
     );
+  }
+
+  // --- LOGIC EXPORT (BACKUP) ---
+  // --- LOGIC EXPORT (BACKUP) ---
+  Future<void> _exportData() async {
+    try {
+      // 1. AMBIL INSTANCE DATABASE
+      // Pastikan kita mendapatkan koneksi yang aktif
+      final db = await DatabaseHelper.instance.database;
+
+      // 2. JALANKAN VACUUM (PEMBERSIHAN TOTAL)
+      // Ini wajib dilakukan agar data yang sudah dihapus BENAR-BENAR HILANG dari file fisik
+      await db.execute('VACUUM');
+
+      // 3. FLUSH DATA: Tutup database
+      // Menutup koneksi untuk memastikan file aman dicopy
+      await DatabaseHelper.instance.closeDatabase();
+
+      // 4. Ambil file database asli
+      final dbHelper = DatabaseHelper.instance;
+      final dbPath = await dbHelper.getDbPath();
+      final File sourceFile = File(dbPath);
+
+      if (!await sourceFile.exists()) {
+        throw 'Database belum dibuat.';
+      }
+
+      // 5. Buat nama file backup unik
+      final timestamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+      final fileName = 'fintrack_backup_$timestamp.db';
+
+      // 6. Simpan sementara di folder cache/dokumen
+      final directory = await getTemporaryDirectory();
+      final backupPath = '${directory.path}/$fileName';
+
+      // Salin file yang SUDAH BERSIH (Vacuumed)
+      await sourceFile.copy(backupPath);
+
+      // 7. Pancing database agar terbuka kembali (untuk dipakai app selanjutnya)
+      await DatabaseHelper.instance.database;
+
+      // 8. Bagikan file tersebut
+      await Share.shareXFiles([
+        XFile(backupPath),
+      ], text: 'Backup Data FinTrack');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal Export: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // --- LOGIC IMPORT (RESTORE) ---
+  Future<void> _importData() async {
+    try {
+      // 1. Pilih File Backup (.db)
+      final result = await FilePicker.platform.pickFiles();
+
+      if (result != null && result.files.single.path != null) {
+        final File backupFile = File(result.files.single.path!);
+
+        // Konfirmasi User (Penting! Karena data akan ditimpa)
+        final bool? confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Restore Data?'),
+            content: const Text(
+              'PERINGATAN: Semua data transaksi & kategori saat ini akan DIHAPUS dan digantikan dengan data dari file backup.\n\nLanjutkan?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Batal'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  'Ya, Restore',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        );
+
+        if (confirm == true) {
+          // 2. Tutup koneksi database aktif
+          await DatabaseHelper.instance.closeForRestore();
+
+          // 3. Timpa file database asli dengan file backup
+          final dbPath = await DatabaseHelper.instance.getDbPath();
+          await backupFile.copy(dbPath);
+
+          // 4. Restart UI (Refresh Provider)
+          ref.invalidate(transactionListProvider);
+          ref.invalidate(dashboardSummaryProvider);
+          ref.invalidate(categoryListProvider); // Refresh kategori juga
+
+          if (mounted) {
+            Navigator.pop(context); // Tutup drawer
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Data berhasil dipulihkan!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal Import: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }

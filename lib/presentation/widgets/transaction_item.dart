@@ -5,8 +5,13 @@ import '../../core/utils/app_icons.dart';
 
 class TransactionItem extends StatelessWidget {
   final Transaction transaction;
+  final bool showDate;
 
-  const TransactionItem({super.key, required this.transaction});
+  const TransactionItem({
+    super.key,
+    required this.transaction,
+    this.showDate = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -57,11 +62,13 @@ class TransactionItem extends StatelessWidget {
                 fontSize: 14,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              formatDate(transaction.date),
-              style: TextStyle(color: Colors.grey[400], fontSize: 10),
-            ),
+            if (showDate) ...[
+              const SizedBox(height: 4),
+              Text(
+                formatDate(transaction.date),
+                style: TextStyle(color: Colors.grey[400], fontSize: 10),
+              ),
+            ],
           ],
         ),
       ),

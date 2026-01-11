@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_iconpicker/flutter_iconpicker.dart'; // <--- IMPORT WAJIB
+
 import '../../core/utils/app_icons.dart';
 import '../../domain/entities/category.dart';
 import '../providers/category_provider.dart';
 import '../providers/usecase_providers.dart';
-import 'package:flutter/services.dart';
 
 class CategoryFormPage extends ConsumerStatefulWidget {
   // Parameter opsional untuk mode EDIT
@@ -46,13 +48,32 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
     super.dispose();
   }
 
+  // --- LOGIC PICK ICON ---
+  Future<void> _pickIcon() async {
+    // Membuka dialog icon picker
+    IconData? icon = await showIconPicker(
+      context,
+      iconPackModes: [IconPack.material], // Gunakan Material Icons
+      title: const Text('Pilih Ikon'),
+      searchHintText: 'Cari ikon...',
+      closeChild: const Text('Tutup'),
+    );
+
+    if (icon != null) {
+      setState(() {
+        // Simpan CodePoint (ID Angka) sebagai String
+        _selectedIcon = icon.codePoint.toString();
+      });
+    }
+  }
+
   void _submitData() async {
     if (_formKey.currentState!.validate()) {
       try {
         if (_isEditMode) {
           // --- LOGIC UPDATE ---
           final updatedCategory = Category(
-            id: widget.categoryToEdit!.id, // ID LAMA JANGAN HILANG
+            id: widget.categoryToEdit!.id,
             name: _nameController.text,
             icon: _selectedIcon,
             color: _selectedColor,
@@ -99,9 +120,6 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
     }
   }
 
-  // --- UI PICKER COLORS & ICONS ---
-  // (Bagian ini sama seperti sebelumnya, tapi logic submit di atas sudah berubah)
-
   final List<Color> _availableColors = [
     Colors.red,
     Colors.pink,
@@ -125,9 +143,6 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Ambil Map Icon dari AppIcons
-    final Map<String, IconData> availableIcons = AppIcons.map;
-
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEditMode ? 'Edit Kategori' : 'Buat Kategori Baru'),
@@ -159,7 +174,7 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
 
               const SizedBox(height: 20),
 
-              // 2. PILIH TIPE (Disabled jika Edit Mode agar data konsisten)
+              // 2. PILIH TIPE
               Text('Jenis Kategori', style: TextStyle(color: Colors.grey[600])),
               const SizedBox(height: 8),
               SegmentedButton<String>(
@@ -168,7 +183,6 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
                   ButtonSegment(value: 'income', label: Text('Pemasukan')),
                 ],
                 selected: {_type},
-                // Jika edit mode, disable tombol ganti tipe (null callback)
                 onSelectionChanged: _isEditMode
                     ? null
                     : (val) => setState(() => _type = val.first),
@@ -235,14 +249,62 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
               const Divider(),
               const SizedBox(height: 10),
 
-              // 4. PILIH ICON
-              const Text(
-                'Pilih Ikon',
-                style: TextStyle(fontWeight: FontWeight.bold),
+              // 4. PILIH ICON (LOGIC BARU)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Ikon',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  TextButton.icon(
+                    onPressed: _pickIcon, // Panggil fungsi picker
+                    icon: const Icon(Icons.search),
+                    label: const Text('Cari Icon Lain'),
+                  ),
+                ],
               ),
               const SizedBox(height: 10),
+
+              // Tampilan Preview Icon yang Sedang Dipilih
+              Center(
+                child: GestureDetector(
+                  onTap: _pickIcon,
+                  child: Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: Color(_selectedColor).withOpacity(0.2),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Color(_selectedColor),
+                        width: 2,
+                      ),
+                    ),
+                    child: Icon(
+                      AppIcons.getIcon(_selectedIcon),
+                      size: 40,
+                      color: Color(_selectedColor),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 10),
+              const Center(
+                child: Text(
+                  "Tap icon di atas untuk mengganti",
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+              const Text("Pilihan Cepat:"),
+              const SizedBox(height: 10),
+
+              // Pilihan Cepat (Grid Kecil dari icon bawaan)
               Container(
-                height: 250,
+                height: 150,
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.grey.shade300),
@@ -250,14 +312,14 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
                 ),
                 child: GridView.builder(
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 5,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
+                    crossAxisCount: 6, // Lebih padat dari sebelumnya
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
                   ),
-                  itemCount: availableIcons.length,
+                  itemCount: AppIcons.map.length,
                   itemBuilder: (context, index) {
-                    final key = availableIcons.keys.elementAt(index);
-                    final iconData = availableIcons.values.elementAt(index);
+                    final key = AppIcons.map.keys.elementAt(index);
+                    final iconData = AppIcons.map.values.elementAt(index);
                     final isSelected = _selectedIcon == key;
 
                     return InkWell(
@@ -276,7 +338,7 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
                         child: Icon(
                           iconData,
                           color: isSelected ? Colors.teal : Colors.grey,
-                          size: 28,
+                          size: 20,
                         ),
                       ),
                     );
@@ -322,8 +384,6 @@ class CapitalizeWordsInputFormatter extends TextInputFormatter {
     if (newValue.text.isEmpty) return newValue;
 
     String text = newValue.text;
-
-    // Logic: Ubah huruf pertama tiap kata jadi kapital
     String newText = text
         .split(' ')
         .map((word) {
