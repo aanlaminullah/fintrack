@@ -21,6 +21,9 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../data/datasources/local/database_helper.dart';
+import '../../core/services/report_service.dart'; // Akses service yang baru dibuat
+import 'package:permission_handler/permission_handler.dart';
+import 'dart:typed_data';
 
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
@@ -130,7 +133,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       title: 'Backup Data (Export)',
                       icon: Icons.upload_file,
                       color: Colors.blue,
-                      onTap: _exportData, // Panggil fungsi export
+                      onTap: _showBackupOptions,
                     ),
 
                     // MENU IMPORT
@@ -139,7 +142,21 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       title: 'Restore Data (Import)',
                       icon: Icons.download_for_offline,
                       color: Colors.orange,
-                      onTap: _importData, // Panggil fungsi import
+                      onTap: _importData,
+                    ),
+
+                    const SizedBox(height: 10),
+                    const Divider(),
+                    const SizedBox(height: 10),
+
+                    // MENU LAPORAN (BARU)
+                    _buildModernMenuItem(
+                      context,
+                      title: 'Laporan Keuangan',
+                      icon: Icons.print,
+                      color: Colors.purple,
+                      onTap: () =>
+                          _showExportOptions(context, ref), // Panggil modal
                     ),
 
                     // Contoh Menu Lain (Disabled / Coming Soon)
@@ -439,59 +456,604 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
-  // --- LOGIC EXPORT (BACKUP) ---
-  // --- LOGIC EXPORT (BACKUP) ---
-  Future<void> _exportData() async {
+  // --- MENU PILIHAN BACKUP (FIX OVERFLOW) ---
+  void _showBackupOptions() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(
+              context,
+            ).viewPadding.bottom, // Padding Samsung
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            // HAPUS height: 280, biarkan dia menyesuaikan isi
+            child: Column(
+              mainAxisSize:
+                  MainAxisSize.min, // <--- PENTING: Agar tidak overflow
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Backup Data Database',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Amankan data transaksi Anda agar tidak hilang.',
+                  style: TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 24),
+
+                // PILIHAN 1: SIMPAN KE PENYIMPANAN
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.save_as, color: Colors.blue),
+                  ),
+                  title: const Text('Simpan ke Penyimpanan'),
+                  subtitle: const Text('Pilih lokasi simpan manual'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _processBackup(action: 'save');
+                  },
+                ),
+
+                const SizedBox(height: 10),
+
+                // PILIHAN 2: SHARE
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.share, color: Colors.green),
+                  ),
+                  title: const Text('Bagikan File Backup'),
+                  subtitle: const Text('Kirim ke WhatsApp / Drive'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _processBackup(action: 'share');
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // --- LOGIC PROSES BACKUP (FIX BYTES REQUIRED) ---
+  Future<void> _processBackup({required String action}) async {
     try {
-      // 1. AMBIL INSTANCE DATABASE
-      // Pastikan kita mendapatkan koneksi yang aktif
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sedang memproses backup...')),
+        );
+      }
+
+      // 1. VACUUM & CLOSE DATABASE
       final db = await DatabaseHelper.instance.database;
-
-      // 2. JALANKAN VACUUM (PEMBERSIHAN TOTAL)
-      // Ini wajib dilakukan agar data yang sudah dihapus BENAR-BENAR HILANG dari file fisik
       await db.execute('VACUUM');
-
-      // 3. FLUSH DATA: Tutup database
-      // Menutup koneksi untuk memastikan file aman dicopy
       await DatabaseHelper.instance.closeDatabase();
 
-      // 4. Ambil file database asli
+      // 2. SIAPKAN FILE DARI DATABASE ASLI
       final dbHelper = DatabaseHelper.instance;
       final dbPath = await dbHelper.getDbPath();
       final File sourceFile = File(dbPath);
 
-      if (!await sourceFile.exists()) {
-        throw 'Database belum dibuat.';
-      }
+      if (!await sourceFile.exists()) throw 'Database tidak ditemukan.';
 
-      // 5. Buat nama file backup unik
       final timestamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
       final fileName = 'fintrack_backup_$timestamp.db';
 
-      // 6. Simpan sementara di folder cache/dokumen
-      final directory = await getTemporaryDirectory();
-      final backupPath = '${directory.path}/$fileName';
+      // Copy ke Cache dulu
+      final tempDir = await getTemporaryDirectory();
+      final tempPath = '${tempDir.path}/$fileName';
+      final File tempFile = await sourceFile.copy(tempPath);
 
-      // Salin file yang SUDAH BERSIH (Vacuumed)
-      await sourceFile.copy(backupPath);
-
-      // 7. Pancing database agar terbuka kembali (untuk dipakai app selanjutnya)
+      // 3. BUKA KEMBALI DATABASE (Agar aplikasi tidak error)
       await DatabaseHelper.instance.database;
 
-      // 8. Bagikan file tersebut
-      await Share.shareXFiles([
-        XFile(backupPath),
-      ], text: 'Backup Data FinTrack');
+      // 4. EKSEKUSI
+      if (action == 'share') {
+        // --- SHARE ---
+        await Share.shareXFiles([
+          XFile(tempPath),
+        ], text: 'Backup Data FinTrack');
+      } else if (action == 'save') {
+        // --- SIMPAN KE FILE (FIX) ---
+        // Baca file menjadi bytes (data mentah)
+        final Uint8List fileBytes = await tempFile.readAsBytes();
+
+        // Simpan menggunakan bytes (Ini akan membuka dialog simpan Android)
+        final String? outputFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Simpan File Backup',
+          fileName: fileName,
+          bytes: fileBytes, // <--- WAJIB DIISI UNTUK ANDROID/IOS
+        );
+
+        if (outputFile != null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Backup berhasil disimpan!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Penyimpanan dibatalkan.')),
+            );
+          }
+        }
+      }
     } catch (e) {
+      await DatabaseHelper.instance.database; // Safety open
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Gagal Export: $e'),
+            content: Text('Gagal Backup: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
     }
+  }
+
+  _showExportOptions(BuildContext context, WidgetRef ref) {
+    // Default: Bulan Ini
+    final now = DateTime.now();
+    DateTime selectedMonth = DateTime(now.year, now.month);
+    DateTimeRange customRange = DateTimeRange(
+      start: DateTime(now.year, now.month, 1),
+      end: DateTime(now.year, now.month + 1, 0),
+    );
+
+    String selectedMode = 'monthly';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true, // Tetap biarkan true
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            DateTime getFinalStart() {
+              if (selectedMode == 'monthly') {
+                return DateTime(selectedMonth.year, selectedMonth.month, 1);
+              } else {
+                return customRange.start;
+              }
+            }
+
+            DateTime getFinalEnd() {
+              if (selectedMode == 'monthly') {
+                return DateTime(selectedMonth.year, selectedMonth.month + 1, 0);
+              } else {
+                return customRange.end;
+              }
+            }
+
+            // --- PERBAIKAN DI SINI ---
+            // Kita bungkus Container dengan Padding yang membaca 'viewPadding.bottom'
+            // Ini akan otomatis mengangkat konten setinggi tombol navigasi HP Samsung Anda
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewPadding.bottom,
+              ),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(
+                  24,
+                  24,
+                  24,
+                  0,
+                ), // Padding bawah 0 karena sudah dihandle viewPadding
+                height: 450,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Periode Laporan',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // --- PILIHAN TIPE PERIODE (TAB) ---
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () =>
+                                  setModalState(() => selectedMode = 'monthly'),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: selectedMode == 'monthly'
+                                      ? Colors.teal
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  'Per Bulan',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: selectedMode == 'monthly'
+                                        ? Colors.white
+                                        : Colors.black54,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () =>
+                                  setModalState(() => selectedMode = 'custom'),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: selectedMode == 'custom'
+                                      ? Colors.teal
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  'Custom Tanggal',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: selectedMode == 'custom'
+                                        ? Colors.white
+                                        : Colors.black54,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // --- TAMPILAN INPUT SESUAI MODE ---
+                    if (selectedMode == 'monthly') ...[
+                      const Text(
+                        'Pilih Bulan:',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                      const SizedBox(height: 8),
+                      InkWell(
+                        onTap: () async {
+                          final picked = await _showMonthPicker(
+                            context,
+                            selectedMonth,
+                          );
+                          if (picked != null) {
+                            setModalState(() {
+                              selectedMonth = picked;
+                            });
+                          }
+                        },
+                        child: _buildDateContainer(
+                          icon: Icons.calendar_month,
+                          text: DateFormat(
+                            'MMMM yyyy',
+                            'id_ID',
+                          ).format(selectedMonth),
+                        ),
+                      ),
+                    ] else ...[
+                      const Text(
+                        'Pilih Rentang Tanggal:',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                      const SizedBox(height: 8),
+                      InkWell(
+                        onTap: () async {
+                          final picked = await showDateRangePicker(
+                            context: context,
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime(2030),
+                            initialDateRange: customRange,
+                            builder: (context, child) {
+                              return Theme(
+                                data: ThemeData.light().copyWith(
+                                  colorScheme: const ColorScheme.light(
+                                    primary: Colors.teal,
+                                    onPrimary: Colors.white,
+                                  ),
+                                ),
+                                child: child!,
+                              );
+                            },
+                          );
+                          if (picked != null) {
+                            setModalState(() {
+                              customRange = picked;
+                            });
+                          }
+                        },
+                        child: _buildDateContainer(
+                          icon: Icons.date_range,
+                          text:
+                              '${DateFormat('dd MMM yyyy', 'id_ID').format(customRange.start)} - ${DateFormat('dd MMM yyyy', 'id_ID').format(customRange.end)}',
+                        ),
+                      ),
+                    ],
+
+                    const Spacer(),
+                    const Divider(),
+                    const Text(
+                      'Export Sebagai:',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // TOMBOL EKSEKUSI (PDF / CSV)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _processAndExport(
+                              ref,
+                              ctx,
+                              getFinalStart(),
+                              getFinalEnd(),
+                              'pdf',
+                            ),
+                            icon: const Icon(
+                              Icons.picture_as_pdf,
+                              color: Colors.red,
+                            ),
+                            label: const Text(
+                              'PDF',
+                              style: TextStyle(color: Colors.red),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Colors.red),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _processAndExport(
+                              ref,
+                              ctx,
+                              getFinalStart(),
+                              getFinalEnd(),
+                              'csv',
+                            ),
+                            icon: const Icon(
+                              Icons.table_view,
+                              color: Colors.green,
+                            ),
+                            label: const Text(
+                              'Excel',
+                              style: TextStyle(color: Colors.green),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Colors.green),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20), // Jarak aman tambahan
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _processAndExport(
+    WidgetRef ref,
+    BuildContext ctx,
+    DateTime start,
+    DateTime end,
+    String type,
+  ) async {
+    Navigator.pop(ctx); // Tutup modal dulu
+
+    final transactionState = ref.read(transactionListProvider);
+
+    if (transactionState.hasValue) {
+      final allData = transactionState.value!;
+
+      // 1. FILTER BERDASARKAN TANGGAL
+      final filteredData = allData.where((t) {
+        // Normalisasi tanggal agar jam tidak mempengaruhi
+        final tDate = DateTime(t.date.year, t.date.month, t.date.day);
+        final sDate = DateTime(start.year, start.month, start.day);
+        final eDate = DateTime(end.year, end.month, end.day);
+
+        // Logika: Tanggal transaksi >= start DAN <= end
+        return (tDate.isAtSameMomentAs(sDate) || tDate.isAfter(sDate)) &&
+            (tDate.isAtSameMomentAs(eDate) || tDate.isBefore(eDate));
+      }).toList();
+
+      if (filteredData.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Tidak ada transaksi di periode ini!'),
+            ),
+          );
+        }
+        return;
+      }
+
+      // 2. SORTING (TERLAMA KE TERBARU)
+      // Tanggal kecil (lama) di atas, besar (baru) di bawah
+      filteredData.sort((a, b) => a.date.compareTo(b.date));
+
+      // 3. EKSEKUSI EXPORT
+      if (type == 'pdf') {
+        // Pass start & end date untuk Header PDF
+        await ReportService.generatePdfReport(filteredData, start, end);
+      } else {
+        await ReportService.generateCsvReport(filteredData);
+      }
+    }
+  }
+
+  // --- HELPER WIDGET UNTUK KOTAK TANGGAL ---
+  Widget _buildDateContainer({required IconData icon, required String text}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(12),
+        color: Colors.white,
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: Colors.teal),
+          const SizedBox(width: 12),
+          Text(
+            text,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          const Spacer(),
+          const Icon(Icons.arrow_drop_down, color: Colors.grey),
+        ],
+      ),
+    );
+  }
+
+  // --- HELPER CUSTOM MONTH PICKER DIALOG ---
+  Future<DateTime?> _showMonthPicker(
+    BuildContext context,
+    DateTime initialDate,
+  ) async {
+    DateTime tempDate = initialDate;
+
+    return showDialog<DateTime>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.chevron_left),
+                    onPressed: () => setState(
+                      () => tempDate = DateTime(
+                        tempDate.year - 1,
+                        tempDate.month,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    tempDate.year.toString(),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right),
+                    onPressed: () => setState(
+                      () => tempDate = DateTime(
+                        tempDate.year + 1,
+                        tempDate.month,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 300,
+                child: GridView.builder(
+                  itemCount: 12,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    childAspectRatio: 1.5,
+                  ),
+                  itemBuilder: (context, index) {
+                    final monthDate = DateTime(tempDate.year, index + 1);
+                    final isSelected =
+                        monthDate.year == initialDate.year &&
+                        monthDate.month == initialDate.month;
+                    // Cek apakah ini bulan yang dipilih di dialog saat ini
+                    final isCurrentTemp = monthDate.month == tempDate.month;
+
+                    return InkWell(
+                      onTap: () {
+                        Navigator.pop(context, monthDate);
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.all(4),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: isCurrentTemp
+                              ? Colors.teal
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: isCurrentTemp
+                              ? null
+                              : Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Text(
+                          DateFormat('MMM', 'id_ID').format(monthDate),
+                          style: TextStyle(
+                            color: isCurrentTemp
+                                ? Colors.white
+                                : Colors.black87,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   // --- LOGIC IMPORT (RESTORE) ---

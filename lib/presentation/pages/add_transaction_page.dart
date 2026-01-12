@@ -596,7 +596,10 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
           if (_isAmountFocused)
             Container(
               color: Colors.grey[100],
-              padding: const EdgeInsets.only(top: 10, bottom: 20),
+              padding: EdgeInsets.only(
+                top: 10,
+                bottom: 20 + MediaQuery.of(context).viewPadding.bottom,
+              ),
               child: Column(
                 children: [
                   Row(
