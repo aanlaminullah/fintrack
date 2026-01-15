@@ -30,12 +30,12 @@ class CategoryRepositoryImpl implements CategoryRepository {
   Future<Either<Failure, int>> addCategory(Category category) async {
     try {
       final db = await databaseHelper.database;
-      // Kita perlu cast Category entity ke CategoryModel agar bisa panggil toJson()
       final categoryModel = CategoryModel(
         name: category.name,
         icon: category.icon,
         color: category.color,
         type: category.type,
+        budget: category.budget,
       );
 
       final id = await db.insert('categories', categoryModel.toJson());

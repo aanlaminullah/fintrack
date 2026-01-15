@@ -108,7 +108,7 @@ class ExpensePieChart extends StatelessWidget {
   }
 
   List<Widget> _generateLegend(Map<String, int> data) {
-    final limitedData = data.entries.take(4).toList();
+    final limitedData = data.entries.take(5).toList();
     return limitedData.map((entry) {
       final splitKey = entry.key.split('|');
       final name = splitKey[0];

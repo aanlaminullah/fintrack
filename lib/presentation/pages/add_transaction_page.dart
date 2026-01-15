@@ -29,7 +29,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
   final _titleController = TextEditingController();
   final _amountController = TextEditingController();
 
-  // Focus Nodes (Untuk mengatur alur fokus Next)
+  // Focus Nodes
   final FocusNode _titleFocusNode = FocusNode();
 
   // State
@@ -37,8 +37,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
   DateTime _selectedDate = DateTime.now();
   Category? _selectedCategory;
   bool _isCategoryInitialized = false;
-
-  // State untuk fokus (agar tahu keyboard mana yang muncul)
   bool _isAmountFocused = false;
 
   @override
@@ -62,7 +60,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
 
   @override
   void dispose() {
-    _deleteTimer?.cancel(); // Matikan timer saat keluar halaman
+    _deleteTimer?.cancel();
     _titleController.dispose();
     _amountController.dispose();
     _titleFocusNode.dispose();
@@ -70,16 +68,12 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
   }
 
   // --- LOGIC KEYBOARD CUSTOM ---
-
   void _onKeyTap(String value) {
     String currentText = _amountController.text.replaceAll(
       RegExp(r'[^0-9]'),
       '',
     );
-
-    // Cegah angka 0 di depan
     if (currentText == '0') currentText = '';
-
     String newText = currentText + value;
     _formatAndSetAmount(newText);
   }
@@ -111,7 +105,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
       _amountController.text = '';
       return;
     }
-
     int value = int.tryParse(rawString) ?? 0;
     final formatter = NumberFormat.currency(
       locale: 'id_ID',
@@ -121,7 +114,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
     _amountController.text = formatter.format(value);
   }
 
-  // --- LOGIC SUBMIT ---
+  // --- LOGIC SUBMIT (DENGAN SAFETY NET) ---
 
   void _submitData() async {
     if (_formKey.currentState!.validate()) {
@@ -143,59 +136,209 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
         return;
       }
 
-      try {
-        if (widget.transactionToEdit == null) {
-          final newTransaction = entity.Transaction(
-            title: title,
-            amount: amount,
-            type: _type,
-            categoryId: _selectedCategory!.id!,
-            date: _selectedDate,
-          );
-          await ref
-              .read(transactionListProvider.notifier)
-              .addTransaction(newTransaction);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Transaksi berhasil disimpan!'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        } else {
-          final updatedTransaction = entity.Transaction(
-            id: widget.transactionToEdit!.id,
-            title: title,
-            amount: amount,
-            type: _type,
-            categoryId: _selectedCategory!.id!,
-            date: _selectedDate,
-          );
-          await ref
-              .read(transactionListProvider.notifier)
-              .updateTransaction(updatedTransaction);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Perubahan berhasil disimpan!'),
-                backgroundColor: Colors.teal,
-              ),
-            );
-          }
+      // --- SAFETY CHECK (PERINGATAN CASHFLOW) ---
+      // Hanya cek jika ini Pengeluaran (Expense)
+      if (_type == 'expense') {
+        final shouldProceed = await _checkSafetyNet(amount);
+        if (!shouldProceed) return; // Batal simpan jika user bilang "Batal"
+      }
+
+      // --- PROSES SIMPAN ---
+      _saveToDatabase(title, amount);
+    }
+  }
+
+  Future<bool> _checkSafetyNet(int newAmount) async {
+    // Ambil data transaksi dari Provider
+    final transactionState = ref.read(transactionListProvider);
+
+    // Jika data belum siap, lewati cek (langsung simpan)
+    if (!transactionState.hasValue) return true;
+
+    final allTransactions = transactionState.value!;
+
+    // Filter Bulan Ini
+    final now = DateTime.now();
+    final thisMonthTransactions = allTransactions.where((t) {
+      return t.date.month == now.month && t.date.year == now.year;
+    }).toList();
+
+    // 1. CEK GLOBAL (SISA GAJI)
+    int totalIncome = 0;
+    int totalExpense = 0;
+
+    for (var t in thisMonthTransactions) {
+      // Jika kita sedang Edit, jangan hitung transaksi yang sedang diedit ini
+      if (widget.transactionToEdit != null &&
+          t.id == widget.transactionToEdit!.id)
+        continue;
+
+      if (t.type == 'income')
+        totalIncome += t.amount;
+      else
+        totalExpense += t.amount;
+    }
+
+    final currentBalance = totalIncome - totalExpense;
+    final balanceAfterTransaction = currentBalance - newAmount;
+
+    // 2. CEK KATEGORI (OVER BUDGET)
+    bool isOverCategory = false;
+    String categoryWarning = '';
+
+    if (_selectedCategory!.budget > 0) {
+      int categoryExpense = 0;
+      for (var t in thisMonthTransactions) {
+        // Jangan hitung transaksi yang sedang diedit
+        if (widget.transactionToEdit != null &&
+            t.id == widget.transactionToEdit!.id)
+          continue;
+
+        if (t.categoryId == _selectedCategory!.id && t.type == 'expense') {
+          categoryExpense += t.amount;
         }
-        if (mounted) Navigator.of(context).pop();
-      } catch (e) {
+      }
+
+      if (categoryExpense + newAmount > _selectedCategory!.budget) {
+        isOverCategory = true;
+        categoryWarning =
+            'Budget ${_selectedCategory!.name} akan jebol (Over)!';
+      }
+    }
+
+    // --- LOGIKA MUNCUL POPUP ---
+    // Muncul jika: Sisa Uang Jadi Minus ATAU Budget Kategori Jebol
+    if (balanceAfterTransaction < 0 || isOverCategory) {
+      return await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: Row(
+                children: const [
+                  Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text('Peringatan Keuangan'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (balanceAfterTransaction < 0) ...[
+                    Text(
+                      '⚠️ SISA GAJI TIDAK CUKUP!',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Sisa uang bebas Anda saat ini: ${_formatRupiah(currentBalance)}',
+                    ),
+                    Text(
+                      'Setelah transaksi ini: ${_formatRupiah(balanceAfterTransaction)} (MINUS)',
+                    ),
+                    const Divider(),
+                  ],
+
+                  if (isOverCategory) ...[
+                    Text(
+                      '⚠️ $categoryWarning',
+                      style: TextStyle(
+                        color: Colors.orange[800],
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+
+                  const SizedBox(height: 10),
+                  const Text('Apakah Anda yakin tetap ingin menyimpan?'),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false), // BATAL
+                  child: const Text('Batal'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true), // LANJUT (NEKAD)
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  child: const Text(
+                    'Tetap Simpan',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ) ??
+          false; // Default false (batal) jika dialog ditutup paksa
+    }
+
+    return true; // Aman, lanjut simpan
+  }
+
+  void _saveToDatabase(String title, int amount) async {
+    try {
+      if (widget.transactionToEdit == null) {
+        final newTransaction = entity.Transaction(
+          title: title,
+          amount: amount,
+          type: _type,
+          categoryId: _selectedCategory!.id!,
+          date: _selectedDate,
+        );
+        await ref
+            .read(transactionListProvider.notifier)
+            .addTransaction(newTransaction);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+            const SnackBar(
+              content: Text('Transaksi berhasil disimpan!'),
+              backgroundColor: Colors.green,
+            ),
           );
         }
+      } else {
+        final updatedTransaction = entity.Transaction(
+          id: widget.transactionToEdit!.id,
+          title: title,
+          amount: amount,
+          type: _type,
+          categoryId: _selectedCategory!.id!,
+          date: _selectedDate,
+        );
+        await ref
+            .read(transactionListProvider.notifier)
+            .updateTransaction(updatedTransaction);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Perubahan berhasil disimpan!'),
+              backgroundColor: Colors.teal,
+            ),
+          );
+        }
+      }
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
       }
     }
   }
 
-  // --- UI COMPONENTS ---
+  String _formatRupiah(int amount) {
+    return NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    ).format(amount);
+  }
+
+  // --- UI COMPONENTS (SAMA SEPERTI SEBELUMNYA) ---
 
   void _showCategoryPicker() {
     setState(() => _isAmountFocused = false);
@@ -378,7 +521,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 1. SWITCH TYPE
+                    // SEGMENTED BUTTON
                     Center(
                       child: SegmentedButton<String>(
                         segments: const [
@@ -416,23 +559,18 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                     ),
                     const SizedBox(height: 24),
 
-                    // 2. JUDUL (System Keyboard)
+                    // JUDUL INPUT
                     TextFormField(
                       controller: _titleController,
-                      focusNode: _titleFocusNode, // 1. Pasang FocusNode
-                      autofocus: true, // 2. Aktifkan Autofocus
-                      textInputAction: TextInputAction
-                          .next, // 3. Tombol Keyboard jadi "Next"
-                      // 4. LOGIC SAAT TOMBOL NEXT DITEKAN
+                      focusNode: _titleFocusNode,
+                      autofocus: true,
+                      textInputAction: TextInputAction.next,
                       onFieldSubmitted: (_) {
-                        // Tutup keyboard huruf
                         _titleFocusNode.unfocus();
-                        // Buka keyboard angka custom
                         setState(() {
                           _isAmountFocused = true;
                         });
                       },
-
                       textCapitalization: TextCapitalization.words,
                       inputFormatters: [CapitalizeWordsInputFormatter()],
                       onTap: () {
@@ -452,14 +590,13 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                     ),
                     const SizedBox(height: 16),
 
-                    // 3. NOMINAL (CUSTOM KEYBOARD)
+                    // NOMINAL INPUT
                     TextFormField(
                       controller: _amountController,
                       readOnly: true,
                       showCursor: true,
                       onTap: () {
-                        // Jika user tap manual ke field nominal
-                        _titleFocusNode.unfocus(); // Pastikan judul tidak fokus
+                        _titleFocusNode.unfocus();
                         setState(() => _isAmountFocused = true);
                       },
                       style: const TextStyle(
@@ -471,11 +608,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                         hintText: '0',
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: _isAmountFocused
-                              ? const BorderSide(color: Colors.teal, width: 2)
-                              : const BorderSide(),
                         ),
-                        // Agar border tetap teal saat 'fokus' (custom state)
                         enabledBorder: _isAmountFocused
                             ? OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
@@ -492,15 +625,13 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                               ),
                         prefixIcon: const Icon(Icons.attach_money),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty)
-                          return 'Nominal wajib diisi';
-                        return null;
-                      },
+                      validator: (value) => (value == null || value.isEmpty)
+                          ? 'Nominal wajib diisi'
+                          : null,
                     ),
                     const SizedBox(height: 16),
 
-                    // 4. KATEGORI
+                    // KATEGORI INPUT
                     InkWell(
                       onTap: _showCategoryPicker,
                       borderRadius: BorderRadius.circular(12),
@@ -538,10 +669,9 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 16),
 
-                    // 5. TANGGAL
+                    // TANGGAL INPUT
                     InkWell(
                       onTap: _presentDatePicker,
                       child: InputDecorator(
@@ -561,10 +691,9 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 32),
 
-                    // 6. TOMBOL SIMPAN
+                    // TOMBOL SIMPAN
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -592,7 +721,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
             ),
           ),
 
-          // --- CUSTOM NUMPAD ---
+          // CUSTOM NUMPAD
           if (_isAmountFocused)
             Container(
               color: Colors.grey[100],
@@ -628,42 +757,19 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                       Expanded(
                         child: InkWell(
                           onTap: _onTripleZero,
-                          child: Container(
-                            height: 60,
-                            margin: const EdgeInsets.all(4),
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              boxShadow: [
-                                BoxShadow(color: Colors.black12, blurRadius: 1),
-                              ],
-                            ),
-                            child: const Text(
-                              '000',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
+                          child: _buildKeyContainer('000'),
                         ),
                       ),
                       _buildNumKey('0'),
                       Expanded(
                         child: GestureDetector(
-                          // Hapus satu kali saat di-tap biasa
                           onTap: _onBackspace,
-                          // Mulai hapus cepat saat ditahan
                           onLongPressStart: (_) {
                             _deleteTimer = Timer.periodic(
-                              const Duration(
-                                milliseconds: 100,
-                              ), // Kecepatan hapus
+                              const Duration(milliseconds: 100),
                               (timer) => _onBackspace(),
                             );
                           },
-                          // Berhenti hapus saat dilepas
                           onLongPressEnd: (_) => _deleteTimer?.cancel(),
                           child: Container(
                             height: 60,
@@ -672,7 +778,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                             decoration: BoxDecoration(
                               color: Colors.red[50],
                               borderRadius: BorderRadius.circular(8),
-                              boxShadow: [
+                              boxShadow: const [
                                 BoxShadow(color: Colors.black12, blurRadius: 1),
                               ],
                             ),
@@ -686,10 +792,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                     ],
                   ),
                   Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4.0,
-                      vertical: 4.0,
-                    ),
+                    padding: const EdgeInsets.all(4.0),
                     child: SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -711,6 +814,23 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildKeyContainer(String text) {
+    return Container(
+      height: 60,
+      margin: const EdgeInsets.all(4),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 1)],
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -745,8 +865,7 @@ class CapitalizeWordsInputFormatter extends TextInputFormatter {
     TextEditingValue newValue,
   ) {
     if (newValue.text.isEmpty) return newValue;
-    String text = newValue.text;
-    String newText = text
+    String newText = newValue.text
         .split(' ')
         .map((word) {
           if (word.isNotEmpty) return word[0].toUpperCase() + word.substring(1);

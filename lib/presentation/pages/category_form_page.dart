@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_iconpicker/flutter_iconpicker.dart'; // <--- IMPORT WAJIB
+import 'package:flutter_iconpicker/flutter_iconpicker.dart';
+import 'package:intl/intl.dart'; // Import untuk format Rupiah
 
 import '../../core/utils/app_icons.dart';
 import '../../domain/entities/category.dart';
@@ -9,7 +10,6 @@ import '../providers/category_provider.dart';
 import '../providers/usecase_providers.dart';
 
 class CategoryFormPage extends ConsumerStatefulWidget {
-  // Parameter opsional untuk mode EDIT
   final Category? categoryToEdit;
 
   const CategoryFormPage({super.key, this.categoryToEdit});
@@ -21,39 +21,46 @@ class CategoryFormPage extends ConsumerStatefulWidget {
 class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
+  final _budgetController = TextEditingController(); // <--- CONTROLLER BARU
 
   String _type = 'expense';
   String _selectedIcon = 'category';
   int _selectedColor = 0xFF9E9E9E;
 
-  // Flag edit mode
   bool get _isEditMode => widget.categoryToEdit != null;
 
   @override
   void initState() {
     super.initState();
-    // Jika Mode Edit: Isi form dengan data lama
     if (_isEditMode) {
       final c = widget.categoryToEdit!;
       _nameController.text = c.name;
       _type = c.type;
       _selectedIcon = c.icon;
       _selectedColor = c.color;
+
+      // Isi budget jika ada (dan bukan 0)
+      if (c.budget > 0) {
+        _budgetController.text = NumberFormat.currency(
+          locale: 'id_ID',
+          symbol: '',
+          decimalDigits: 0,
+        ).format(c.budget);
+      }
     }
   }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _budgetController.dispose(); // Jangan lupa dispose
     super.dispose();
   }
 
-  // --- LOGIC PICK ICON ---
   Future<void> _pickIcon() async {
-    // Membuka dialog icon picker
     IconData? icon = await showIconPicker(
       context,
-      iconPackModes: [IconPack.material], // Gunakan Material Icons
+      iconPackModes: [IconPack.material],
       title: const Text('Pilih Ikon'),
       searchHintText: 'Cari ikon...',
       closeChild: const Text('Tutup'),
@@ -61,7 +68,6 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
 
     if (icon != null) {
       setState(() {
-        // Simpan CodePoint (ID Angka) sebagai String
         _selectedIcon = icon.codePoint.toString();
       });
     }
@@ -70,56 +76,55 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
   void _submitData() async {
     if (_formKey.currentState!.validate()) {
       try {
+        // Parsing Budget: Hapus titik, ubah ke int. Kalau kosong jadi 0.
+        final budgetString = _budgetController.text.replaceAll('.', '');
+        final int budgetValue = int.tryParse(budgetString) ?? 0;
+
         if (_isEditMode) {
-          // --- LOGIC UPDATE ---
+          // --- UPDATE ---
           final updatedCategory = Category(
             id: widget.categoryToEdit!.id,
             name: _nameController.text,
             icon: _selectedIcon,
             color: _selectedColor,
             type: _type,
+            budget: budgetValue, // <--- SIMPAN BUDGET
           );
 
-          final updateUseCase = ref.read(updateCategoryProvider);
-          await updateUseCase(updatedCategory);
-
-          if (mounted) {
+          await ref.read(updateCategoryProvider)(updatedCategory);
+          if (mounted)
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Kategori berhasil diperbarui!')),
+              const SnackBar(content: Text('Kategori diperbarui!')),
             );
-          }
         } else {
-          // --- LOGIC TAMBAH BARU ---
+          // --- CREATE ---
           final newCategory = Category(
             name: _nameController.text,
             icon: _selectedIcon,
             color: _selectedColor,
             type: _type,
+            budget: budgetValue, // <--- SIMPAN BUDGET
           );
 
-          final addUseCase = ref.read(addCategoryProvider);
-          await addUseCase(newCategory);
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Kategori berhasil dibuat!')),
-            );
-          }
+          await ref.read(addCategoryProvider)(newCategory);
+          if (mounted)
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Kategori dibuat!')));
         }
 
-        // Refresh List & Tutup Halaman
         ref.invalidate(categoryListProvider);
         if (mounted) Navigator.pop(context);
       } catch (e) {
-        if (mounted) {
+        if (mounted)
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text('Gagal: $e')));
-        }
       }
     }
   }
 
+  // Helper Warna
   final List<Color> _availableColors = [
     Colors.red,
     Colors.pink,
@@ -148,6 +153,7 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
         title: Text(_isEditMode ? 'Edit Kategori' : 'Buat Kategori Baru'),
       ),
       body: SingleChildScrollView(
+        // PADDING DINAMIS (Safe Area Fix)
         padding: EdgeInsets.fromLTRB(
           20,
           20,
@@ -179,7 +185,33 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
 
               const SizedBox(height: 20),
 
-              // 2. PILIH TIPE
+              // 2. INPUT BUDGET (Hanya Muncul di Tipe Expense)
+              if (_type == 'expense') ...[
+                TextFormField(
+                  controller: _budgetController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    CurrencyInputFormatter(), // Formatter Rupiah
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Batas Anggaran Bulanan (Opsional)',
+                    hintText: '0 (Tidak terbatas)',
+                    helperText: 'Isi nominal jika ingin membatasi pengeluaran',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.savings_outlined,
+                      color: Colors.teal,
+                    ),
+                    suffixText: 'IDR',
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+
+              // 3. PILIH TIPE
               Text('Jenis Kategori', style: TextStyle(color: Colors.grey[600])),
               const SizedBox(height: 8),
               SegmentedButton<String>(
@@ -190,7 +222,13 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
                 selected: {_type},
                 onSelectionChanged: _isEditMode
                     ? null
-                    : (val) => setState(() => _type = val.first),
+                    : (val) {
+                        setState(() {
+                          _type = val.first;
+                          // Reset budget kalau pindah ke income
+                          if (_type == 'income') _budgetController.clear();
+                        });
+                      },
                 style: ButtonStyle(
                   backgroundColor: WidgetStateProperty.resolveWith((states) {
                     if (states.contains(WidgetState.selected)) {
@@ -215,7 +253,7 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
               const Divider(),
               const SizedBox(height: 10),
 
-              // 3. PILIH WARNA
+              // 4. PILIH WARNA
               const Text(
                 'Pilih Warna',
                 style: TextStyle(fontWeight: FontWeight.bold),
@@ -254,7 +292,7 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
               const Divider(),
               const SizedBox(height: 10),
 
-              // 4. PILIH ICON (LOGIC BARU)
+              // 5. PILIH IKON
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -263,7 +301,7 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                   TextButton.icon(
-                    onPressed: _pickIcon, // Panggil fungsi picker
+                    onPressed: _pickIcon,
                     icon: const Icon(Icons.search),
                     label: const Text('Cari Icon Lain'),
                   ),
@@ -271,7 +309,7 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
               ),
               const SizedBox(height: 10),
 
-              // Tampilan Preview Icon yang Sedang Dipilih
+              // Preview Icon
               Center(
                 child: GestureDetector(
                   onTap: _pickIcon,
@@ -294,20 +332,9 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
                   ),
                 ),
               ),
-
-              const SizedBox(height: 10),
-              const Center(
-                child: Text(
-                  "Tap icon di atas untuk mengganti",
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ),
-
               const SizedBox(height: 20),
-              const Text("Pilihan Cepat:"),
-              const SizedBox(height: 10),
 
-              // Pilihan Cepat (Grid Kecil dari icon bawaan)
+              // Quick Pick Icons
               Container(
                 height: 150,
                 padding: const EdgeInsets.all(8),
@@ -317,7 +344,7 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
                 ),
                 child: GridView.builder(
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 6, // Lebih padat dari sebelumnya
+                    crossAxisCount: 6,
                     crossAxisSpacing: 8,
                     mainAxisSpacing: 8,
                   ),
@@ -326,7 +353,6 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
                     final key = AppIcons.map.keys.elementAt(index);
                     final iconData = AppIcons.map.values.elementAt(index);
                     final isSelected = _selectedIcon == key;
-
                     return InkWell(
                       onTap: () => setState(() => _selectedIcon = key),
                       borderRadius: BorderRadius.circular(8),
@@ -353,7 +379,7 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
 
               const SizedBox(height: 30),
 
-              // 5. TOMBOL SIMPAN
+              // 6. TOMBOL SIMPAN
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -380,6 +406,8 @@ class _CategoryFormPageState extends ConsumerState<CategoryFormPage> {
   }
 }
 
+// --- FORMATTER HELPERS ---
+
 class CapitalizeWordsInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -387,18 +415,45 @@ class CapitalizeWordsInputFormatter extends TextInputFormatter {
     TextEditingValue newValue,
   ) {
     if (newValue.text.isEmpty) return newValue;
-
-    String text = newValue.text;
-    String newText = text
+    String newText = newValue.text
         .split(' ')
         .map((word) {
-          if (word.isNotEmpty) {
-            return word[0].toUpperCase() + word.substring(1);
-          }
+          if (word.isNotEmpty) return word[0].toUpperCase() + word.substring(1);
           return '';
         })
         .join(' ');
-
     return TextEditingValue(text: newText, selection: newValue.selection);
+  }
+}
+
+// Formatter agar angka otomatis ada titiknya (1.000.000)
+class CurrencyInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) return newValue;
+
+    // Hapus semua karakter non-digit
+    String newText = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+
+    // Cegah angka 0 di depan
+    if (newText.startsWith('0') && newText.length > 1) {
+      newText = newText.substring(1);
+    }
+
+    if (newText.isEmpty) return newValue;
+
+    // Format ke currency
+    final formatter = NumberFormat('#,###', 'id_ID');
+    String formatted = formatter
+        .format(int.parse(newText))
+        .replaceAll(',', '.');
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
   }
 }

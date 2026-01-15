@@ -4,12 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // Import Providers
 import '../providers/transaction_provider.dart';
 import '../providers/chart_provider.dart';
-import '../providers/category_provider.dart'; // <--- TAMBAHKAN INI
+import '../providers/category_provider.dart';
 
 // Import Widgets & Pages
 import '../widgets/summary_card.dart';
 import '../widgets/transaction_item.dart';
 import '../widgets/expense_pie_chart.dart';
+import '../widgets/budget_summary_widget.dart'; // Widget Baru
 import 'add_transaction_page.dart';
 import 'category_list_page.dart';
 import 'transaction_search_page.dart';
@@ -21,7 +22,7 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../data/datasources/local/database_helper.dart';
-import '../../core/services/report_service.dart'; // Akses service yang baru dibuat
+import '../../core/services/report_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:typed_data';
 
@@ -47,16 +48,17 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   Widget build(BuildContext context) {
     final summaryState = ref.watch(dashboardSummaryProvider);
     final transactionListState = ref.watch(transactionListProvider);
+    final categoryListState = ref.watch(categoryListProvider);
 
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: Colors.grey[50],
 
-      // --- SIDEBAR MODERN (EndDrawer) ---
+      // --- END DRAWER (MENU) ---
       endDrawer: Drawer(
         backgroundColor: Colors.white,
         elevation: 0,
-        width: MediaQuery.of(context).size.width * 0.8, // Lebar 80% layar
+        width: MediaQuery.of(context).size.width * 0.8,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.only(
             topLeft: Radius.circular(30),
@@ -67,7 +69,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. HEADER MODERN (Judul & Close Button)
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
                 child: Row(
@@ -78,7 +79,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
-                        color: Colors.black87,
                       ),
                     ),
                     IconButton(
@@ -99,10 +99,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 20),
-
-              // 2. LIST MENU ITEM
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -122,12 +119,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                         );
                       },
                     ),
-
                     const SizedBox(height: 10),
                     const Divider(),
                     const SizedBox(height: 10),
-
-                    // MENU EXPORT
                     _buildModernMenuItem(
                       context,
                       title: 'Backup Data (Export)',
@@ -135,46 +129,29 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       color: Colors.blue,
                       onTap: _showBackupOptions,
                     ),
-
-                    // MENU IMPORT
                     _buildModernMenuItem(
                       context,
                       title: 'Restore Data (Import)',
                       icon: Icons.download_for_offline,
                       color: Colors.orange,
-                      onTap: _importData,
+                      onTap: _importData, // Logic Restore dipanggil disini
                     ),
-
                     const SizedBox(height: 10),
                     const Divider(),
                     const SizedBox(height: 10),
-
-                    // MENU LAPORAN (BARU)
                     _buildModernMenuItem(
                       context,
                       title: 'Laporan Keuangan',
                       icon: Icons.print,
                       color: Colors.purple,
-                      onTap: () =>
-                          _showExportOptions(context, ref), // Panggil modal
+                      onTap: () => _showExportOptions(
+                        context,
+                        ref,
+                      ), // Logic Laporan dipanggil disini
                     ),
-
-                    // Contoh Menu Lain (Disabled / Coming Soon)
-                    /*
-                    const SizedBox(height: 10),
-                    _buildModernMenuItem(
-                      context,
-                      title: 'Pengaturan',
-                      icon: Icons.settings_outlined,
-                      color: Colors.grey,
-                      onTap: () {}, // Kosongkan aksi
-                    ),
-                    */
                   ],
                 ),
               ),
-
-              // 3. FOOTER INFO
               Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Column(
@@ -218,10 +195,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         ),
         actions: [
           IconButton(
-            onPressed: () {
-              _scaffoldKey.currentState?.openEndDrawer();
-            },
-            icon: const Icon(Icons.settings), // Icon Gear
+            onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+            icon: const Icon(Icons.settings),
           ),
         ],
       ),
@@ -241,7 +216,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               children: [
                 const SizedBox(height: 10),
 
-                // CAROUSEL
+                // --- CAROUSEL (2 HALAMAN) ---
                 SizedBox(
                   height: 220,
                   child: PageView(
@@ -252,6 +227,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       });
                     },
                     children: [
+                      // HALAMAN 1: TOTAL SALDO
                       summaryState.when(
                         data: (data) => SummaryCard(
                           totalBalance: data['total'] ?? 0,
@@ -262,15 +238,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                             const Center(child: CircularProgressIndicator()),
                         error: (err, _) => Center(child: Text('Error: $err')),
                       ),
+
                       // HALAMAN 2: PIE CHART
                       Consumer(
                         builder: (context, ref, child) {
-                          // Ambil data chart KHUSUS dashboard (bulan ini)
                           final chartData = ref.watch(dashboardChartProvider);
-
                           return GestureDetector(
                             onTap: () {
-                              // Navigasi ke Halaman Analisis
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
@@ -278,7 +252,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                                 ),
                               );
                             },
-                            // Pass data ke widget
                             child: ExpensePieChart(chartData: chartData),
                           );
                         },
@@ -289,7 +262,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
                 const SizedBox(height: 12),
 
-                // DOTS INDICATOR
+                // DOTS INDICATOR (2 TITIK)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: List.generate(2, (index) {
@@ -308,7 +281,27 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   }),
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
+
+                // --- WIDGET RINGKASAN BUDGET (GLOBAL) ---
+                transactionListState.when(
+                  data: (transactions) {
+                    return categoryListState.when(
+                      data: (categories) {
+                        return BudgetSummaryWidget(
+                          transactions: transactions,
+                          categories: categories,
+                        );
+                      },
+                      loading: () => const SizedBox.shrink(),
+                      error: (_, __) => const SizedBox.shrink(),
+                    );
+                  },
+                  loading: () => const SizedBox.shrink(),
+                  error: (_, __) => const SizedBox.shrink(),
+                ),
+
+                const SizedBox(height: 10),
 
                 // HEADER TRANSAKSI
                 Row(
@@ -361,16 +354,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                         ),
                       );
                     }
-
                     final recentTransactions = transactions.take(5).toList();
-
                     return ListView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: recentTransactions.length,
                       itemBuilder: (context, index) {
                         final transaction = recentTransactions[index];
-
                         return InkWell(
                           onTap: () {
                             Navigator.push(
@@ -412,7 +402,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
-  // --- HELPER WIDGET UNTUK MENU ITEM YANG MODERN ---
+  // --- HELPER WIDGETS ---
   Widget _buildModernMenuItem(
     BuildContext context, {
     required String title,
@@ -425,7 +415,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        // Efek bayangan tipis agar terlihat timbul
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withOpacity(0.05),
@@ -442,7 +431,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1), // Warna background icon transparan
+            color: color.withOpacity(0.1),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(icon, color: color, size: 22),
@@ -456,7 +445,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
-  // --- MENU PILIHAN BACKUP (FIX OVERFLOW) ---
   void _showBackupOptions() {
     showModalBottomSheet(
       context: context,
@@ -467,16 +455,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       builder: (ctx) {
         return Padding(
           padding: EdgeInsets.only(
-            bottom: MediaQuery.of(
-              context,
-            ).viewPadding.bottom, // Padding Samsung
+            bottom: MediaQuery.of(context).viewPadding.bottom,
           ),
           child: Container(
             padding: const EdgeInsets.all(24),
-            // HAPUS height: 280, biarkan dia menyesuaikan isi
             child: Column(
-              mainAxisSize:
-                  MainAxisSize.min, // <--- PENTING: Agar tidak overflow
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
@@ -485,12 +469,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  'Amankan data transaksi Anda agar tidak hilang.',
+                  'Amankan data transaksi Anda.',
                   style: TextStyle(color: Colors.grey),
                 ),
                 const SizedBox(height: 24),
-
-                // PILIHAN 1: SIMPAN KE PENYIMPANAN
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Container(
@@ -508,10 +490,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     _processBackup(action: 'save');
                   },
                 ),
-
                 const SizedBox(height: 10),
-
-                // PILIHAN 2: SHARE
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Container(
@@ -537,7 +516,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
-  // --- LOGIC PROSES BACKUP (FIX BYTES REQUIRED) ---
   Future<void> _processBackup({required String action}) async {
     try {
       if (mounted) {
@@ -545,68 +523,41 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           const SnackBar(content: Text('Sedang memproses backup...')),
         );
       }
-
-      // 1. VACUUM & CLOSE DATABASE
       final db = await DatabaseHelper.instance.database;
       await db.execute('VACUUM');
       await DatabaseHelper.instance.closeDatabase();
-
-      // 2. SIAPKAN FILE DARI DATABASE ASLI
       final dbHelper = DatabaseHelper.instance;
       final dbPath = await dbHelper.getDbPath();
       final File sourceFile = File(dbPath);
-
       if (!await sourceFile.exists()) throw 'Database tidak ditemukan.';
-
       final timestamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
       final fileName = 'fintrack_backup_$timestamp.db';
-
-      // Copy ke Cache dulu
       final tempDir = await getTemporaryDirectory();
       final tempPath = '${tempDir.path}/$fileName';
       final File tempFile = await sourceFile.copy(tempPath);
-
-      // 3. BUKA KEMBALI DATABASE (Agar aplikasi tidak error)
       await DatabaseHelper.instance.database;
-
-      // 4. EKSEKUSI
       if (action == 'share') {
-        // --- SHARE ---
         await Share.shareXFiles([
           XFile(tempPath),
         ], text: 'Backup Data FinTrack');
       } else if (action == 'save') {
-        // --- SIMPAN KE FILE (FIX) ---
-        // Baca file menjadi bytes (data mentah)
         final Uint8List fileBytes = await tempFile.readAsBytes();
-
-        // Simpan menggunakan bytes (Ini akan membuka dialog simpan Android)
         final String? outputFile = await FilePicker.platform.saveFile(
           dialogTitle: 'Simpan File Backup',
           fileName: fileName,
-          bytes: fileBytes, // <--- WAJIB DIISI UNTUK ANDROID/IOS
+          bytes: fileBytes,
         );
-
-        if (outputFile != null) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Backup berhasil disimpan!'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Penyimpanan dibatalkan.')),
-            );
-          }
+        if (outputFile != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Backup berhasil disimpan!'),
+              backgroundColor: Colors.green,
+            ),
+          );
         }
       }
     } catch (e) {
-      await DatabaseHelper.instance.database; // Safety open
-
+      await DatabaseHelper.instance.database;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -618,8 +569,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     }
   }
 
-  _showExportOptions(BuildContext context, WidgetRef ref) {
-    // Default: Bulan Ini
+  // --- LOGIC LAPORAN KEUANGAN (Dikembalikan) ---
+  void _showExportOptions(BuildContext context, WidgetRef ref) {
     final now = DateTime.now();
     DateTime selectedMonth = DateTime(now.year, now.month);
     DateTimeRange customRange = DateTimeRange(
@@ -632,7 +583,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      useSafeArea: true, // Tetap biarkan true
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -655,20 +606,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               }
             }
 
-            // --- PERBAIKAN DI SINI ---
-            // Kita bungkus Container dengan Padding yang membaca 'viewPadding.bottom'
-            // Ini akan otomatis mengangkat konten setinggi tombol navigasi HP Samsung Anda
             return Padding(
               padding: EdgeInsets.only(
                 bottom: MediaQuery.of(context).viewPadding.bottom,
               ),
               child: Container(
-                padding: const EdgeInsets.fromLTRB(
-                  24,
-                  24,
-                  24,
-                  0,
-                ), // Padding bawah 0 karena sudah dihandle viewPadding
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
                 height: 450,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -682,7 +625,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     ),
                     const SizedBox(height: 20),
 
-                    // --- PILIHAN TIPE PERIODE (TAB) ---
+                    // TAB PILIHAN
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.grey.shade200,
@@ -750,7 +693,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
                     const SizedBox(height: 20),
 
-                    // --- TAMPILAN INPUT SESUAI MODE ---
                     if (selectedMode == 'monthly') ...[
                       const Text(
                         'Pilih Bulan:',
@@ -824,7 +766,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     ),
                     const SizedBox(height: 10),
 
-                    // TOMBOL EKSEKUSI (PDF / CSV)
                     Row(
                       children: [
                         Expanded(
@@ -876,7 +817,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20), // Jarak aman tambahan
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),
@@ -887,6 +828,71 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
+  // --- LOGIC RESTORE DATA (Dikembalikan) ---
+  Future<void> _importData() async {
+    try {
+      final result = await FilePicker.platform.pickFiles();
+
+      if (result != null && result.files.single.path != null) {
+        final File backupFile = File(result.files.single.path!);
+
+        final bool? confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Restore Data?'),
+            content: const Text(
+              'PERINGATAN: Semua data transaksi & kategori saat ini akan DIHAPUS dan digantikan dengan data dari file backup.\n\nLanjutkan?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Batal'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  'Ya, Restore',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        );
+
+        if (confirm == true) {
+          await DatabaseHelper.instance.closeForRestore();
+
+          final dbPath = await DatabaseHelper.instance.getDbPath();
+          await backupFile.copy(dbPath);
+
+          ref.invalidate(transactionListProvider);
+          ref.invalidate(dashboardSummaryProvider);
+          ref.invalidate(categoryListProvider);
+
+          if (mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Data berhasil dipulihkan!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal Import: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // --- HELPER METHODS UNTUK LAPORAN ---
   Future<void> _processAndExport(
     WidgetRef ref,
     BuildContext ctx,
@@ -894,21 +900,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     DateTime end,
     String type,
   ) async {
-    Navigator.pop(ctx); // Tutup modal dulu
+    Navigator.pop(ctx);
 
     final transactionState = ref.read(transactionListProvider);
 
     if (transactionState.hasValue) {
       final allData = transactionState.value!;
 
-      // 1. FILTER BERDASARKAN TANGGAL
       final filteredData = allData.where((t) {
-        // Normalisasi tanggal agar jam tidak mempengaruhi
         final tDate = DateTime(t.date.year, t.date.month, t.date.day);
         final sDate = DateTime(start.year, start.month, start.day);
         final eDate = DateTime(end.year, end.month, end.day);
 
-        // Logika: Tanggal transaksi >= start DAN <= end
         return (tDate.isAtSameMomentAs(sDate) || tDate.isAfter(sDate)) &&
             (tDate.isAtSameMomentAs(eDate) || tDate.isBefore(eDate));
       }).toList();
@@ -924,13 +927,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         return;
       }
 
-      // 2. SORTING (TERLAMA KE TERBARU)
-      // Tanggal kecil (lama) di atas, besar (baru) di bawah
       filteredData.sort((a, b) => a.date.compareTo(b.date));
 
-      // 3. EKSEKUSI EXPORT
       if (type == 'pdf') {
-        // Pass start & end date untuk Header PDF
         await ReportService.generatePdfReport(filteredData, start, end);
       } else {
         await ReportService.generateCsvReport(filteredData);
@@ -938,7 +937,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     }
   }
 
-  // --- HELPER WIDGET UNTUK KOTAK TANGGAL ---
   Widget _buildDateContainer({required IconData icon, required String text}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -962,7 +960,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
-  // --- HELPER CUSTOM MONTH PICKER DIALOG ---
   Future<DateTime?> _showMonthPicker(
     BuildContext context,
     DateTime initialDate,
@@ -1016,7 +1013,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     final isSelected =
                         monthDate.year == initialDate.year &&
                         monthDate.month == initialDate.month;
-                    // Cek apakah ini bulan yang dipilih di dialog saat ini
                     final isCurrentTemp = monthDate.month == tempDate.month;
 
                     return InkWell(
@@ -1054,74 +1050,5 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         );
       },
     );
-  }
-
-  // --- LOGIC IMPORT (RESTORE) ---
-  Future<void> _importData() async {
-    try {
-      // 1. Pilih File Backup (.db)
-      final result = await FilePicker.platform.pickFiles();
-
-      if (result != null && result.files.single.path != null) {
-        final File backupFile = File(result.files.single.path!);
-
-        // Konfirmasi User (Penting! Karena data akan ditimpa)
-        final bool? confirm = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Restore Data?'),
-            content: const Text(
-              'PERINGATAN: Semua data transaksi & kategori saat ini akan DIHAPUS dan digantikan dengan data dari file backup.\n\nLanjutkan?',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Batal'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text(
-                  'Ya, Restore',
-                  style: TextStyle(color: Colors.red),
-                ),
-              ),
-            ],
-          ),
-        );
-
-        if (confirm == true) {
-          // 2. Tutup koneksi database aktif
-          await DatabaseHelper.instance.closeForRestore();
-
-          // 3. Timpa file database asli dengan file backup
-          final dbPath = await DatabaseHelper.instance.getDbPath();
-          await backupFile.copy(dbPath);
-
-          // 4. Restart UI (Refresh Provider)
-          ref.invalidate(transactionListProvider);
-          ref.invalidate(dashboardSummaryProvider);
-          ref.invalidate(categoryListProvider); // Refresh kategori juga
-
-          if (mounted) {
-            Navigator.pop(context); // Tutup drawer
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Data berhasil dipulihkan!'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Gagal Import: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 }

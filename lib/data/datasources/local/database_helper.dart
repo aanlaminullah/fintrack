@@ -5,50 +5,67 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
+  // VERSI NAIK JADI 3
+  static const int _dbVersion = 3;
+
   DatabaseHelper._init();
 
-  // Getter untuk mengambil instance database
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDB('fintrack.db');
     return _database!;
   }
 
-  // Inisialisasi Database
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
     return await openDatabase(
       path,
-      version: 1,
+      version: _dbVersion,
       onCreate: _createDB,
-      // Mengaktifkan foreign key support (penting untuk relasi kategori)
+      onUpgrade: _onUpgrade, // <--- Handle Migrasi
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
     );
   }
 
-  // Membuat Tabel saat pertama kali install
+  // MIGRASI DATABASE (Agar data lama tidak hilang)
+  Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute(
+        'ALTER TABLE categories ADD COLUMN budget INTEGER DEFAULT 0',
+      );
+    }
+    // Update Versi 3: Tambah kolom is_weekly
+    if (oldVersion < 3) {
+      await db.execute(
+        'ALTER TABLE categories ADD COLUMN is_weekly INTEGER DEFAULT 0',
+      );
+      print("Database upgraded to v3: Added is_weekly column");
+    }
+  }
+
   Future _createDB(Database db, int version) async {
     const idType = 'INTEGER PRIMARY KEY AUTOINCREMENT';
     const textType = 'TEXT NOT NULL';
     const intType = 'INTEGER NOT NULL';
     const textNullable = 'TEXT';
 
-    // 1. Buat Tabel Categories
+    // Tabel Categories (Lengkap dengan is_weekly)
     await db.execute('''
       CREATE TABLE categories (
         id $idType,
         name $textType,
         icon $textType,
         color $intType,
-        type $textType
+        type $textType,
+        budget INTEGER DEFAULT 0,
+        is_weekly INTEGER DEFAULT 0
       )
     ''');
 
-    // 2. Buat Tabel Transactions
     await db.execute('''
       CREATE TABLE transactions (
         id $idType,
@@ -62,50 +79,58 @@ class DatabaseHelper {
       )
     ''');
 
-    // 3. Isi data awal kategori (Seeding)
     await _seedCategories(db);
   }
 
-  // Data awal agar user langsung punya kategori
   Future _seedCategories(Database db) async {
     final List<Map<String, dynamic>> defaultCategories = [
-      // Pengeluaran
       {
         'name': 'Makan',
         'icon': 'fastfood',
         'color': 0xFFE57373,
         'type': 'expense',
+        'budget': 0,
+        'is_weekly': 0,
       },
       {
         'name': 'Transport',
         'icon': 'directions_car',
         'color': 0xFF64B5F6,
         'type': 'expense',
+        'budget': 0,
+        'is_weekly': 0,
       },
       {
         'name': 'Belanja',
         'icon': 'shopping_cart',
         'color': 0xFFFFD54F,
         'type': 'expense',
+        'budget': 0,
+        'is_weekly': 0,
       },
       {
         'name': 'Hiburan',
         'icon': 'movie',
         'color': 0xFFBA68C8,
         'type': 'expense',
+        'budget': 0,
+        'is_weekly': 0,
       },
-      // Pemasukan
       {
         'name': 'Gaji',
         'icon': 'attach_money',
         'color': 0xFF81C784,
         'type': 'income',
+        'budget': 0,
+        'is_weekly': 0,
       },
       {
         'name': 'Freelance',
         'icon': 'computer',
         'color': 0xFF4DB6AC,
         'type': 'income',
+        'budget': 0,
+        'is_weekly': 0,
       },
     ];
 
@@ -114,34 +139,29 @@ class DatabaseHelper {
     }
   }
 
-  // Method Helper untuk menutup koneksi (opsional)
   Future close() async {
     final db = await instance.database;
     db.close();
   }
 
-  // FITUR BACKUP: Ambil path file database saat ini
   Future<String> getDbPath() async {
     final dbPath = await getDatabasesPath();
     return join(dbPath, 'fintrack.db');
   }
 
-  // FITUR RESTORE: Tutup koneksi agar file bisa ditimpa
   Future<void> closeForRestore() async {
     final db = _database;
     if (db != null) {
       await db.close();
-      _database = null; // Reset instance
+      _database = null;
     }
   }
 
-  // FITUR RESTORE & BACKUP: Tutup koneksi agar file tersimpan sempurna
   Future<void> closeDatabase() async {
     final db = _database;
     if (db != null) {
       await db.close();
-      _database =
-          null; // Reset instance agar nanti dibuka ulang saat ada query baru
+      _database = null;
     }
   }
 }
