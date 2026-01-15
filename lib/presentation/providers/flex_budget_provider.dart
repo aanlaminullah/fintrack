@@ -4,9 +4,9 @@ import '../../domain/entities/category.dart';
 import 'category_provider.dart';
 import 'transaction_provider.dart';
 
-// --- 1. NOTIFIER UNTUK MENYIMPAN SETTING SUMBER PEMASUKAN ---
+// --- 1. NOTIFIER UNTUK MENYIMPAN SETTING ID TRANSAKSI PEMASUKAN ---
 class FlexIncomeSettingsNotifier extends Notifier<List<String>> {
-  static const _key = 'flex_income_source_ids';
+  static const _key = 'flex_income_trx_ids'; // Key baru untuk Transaksi ID
 
   @override
   List<String> build() {
@@ -20,18 +20,25 @@ class FlexIncomeSettingsNotifier extends Notifier<List<String>> {
     state = savedIds;
   }
 
-  Future<void> toggleSource(String categoryId) async {
+  Future<void> toggleSource(String transactionId) async {
     final prefs = await SharedPreferences.getInstance();
     final currentList = List<String>.from(state);
 
-    if (currentList.contains(categoryId)) {
-      currentList.remove(categoryId);
+    if (currentList.contains(transactionId)) {
+      currentList.remove(transactionId);
     } else {
-      currentList.add(categoryId);
+      currentList.add(transactionId);
     }
 
     await prefs.setStringList(_key, currentList);
     state = currentList;
+  }
+
+  // Helper untuk set initial/bulk (misal Select All)
+  Future<void> setAll(List<String> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_key, ids);
+    state = ids;
   }
 }
 
@@ -67,73 +74,80 @@ final flexBudgetCalculationProvider = Provider.autoDispose<FlexBudgetState>((
   // Agar tidak terjadi error subtype CategoryModel vs Category
   final allCategories = allCategoriesRaw.cast<Category>().toList();
 
-  final selectedIncomeIds = ref.watch(flexIncomeSettingsProvider);
-
-  // --- A. HITUNG PEMASUKAN YANG DIPILIH (Income Pool) ---
+  final selectedTrxIds = ref.watch(flexIncomeSettingsProvider);
   final now = DateTime.now();
 
-  // Filter Kategori Income
-  final incomeCategories = allCategories
-      .where((c) => c.type == 'income')
-      .toList();
+  // --- A. KUMPULKAN DAN PISAHKAN SUMBER INCOME ---
+  int totalUncheckedIncome = 0;
+  int totalCheckedIncome = 0;
 
-  // Logic Default: Cari "Gaji" atau ambil yang pertama
-  List<String> effectiveIds = [];
-  if (selectedIncomeIds.isEmpty) {
-    Category? defaultCat;
+  for (var t in allTransactions) {
+    if (t.type != 'income') continue;
 
-    // Cari kategori yang namanya mengandung "gaji" atau "salary"
+    DateTime tDate;
     try {
-      defaultCat = incomeCategories.firstWhere(
-        (c) =>
-            c.name.toLowerCase().contains('gaji') ||
-            c.name.toLowerCase().contains('salary'),
-      );
+      tDate = t.date;
     } catch (_) {
-      // Jika tidak ketemu (error StateError), cek apakah list ada isinya
-      if (incomeCategories.isNotEmpty) {
-        defaultCat = incomeCategories.first;
-      }
+      tDate = DateTime.parse(t.date.toString());
     }
 
-    // Jika ketemu, jadikan default
-    if (defaultCat != null && defaultCat.id != null) {
-      effectiveIds = [defaultCat.id.toString()];
+    final isMonthMatch = tDate.month == now.month && tDate.year == now.year;
+    if (!isMonthMatch) continue;
+
+    // CEK BERDASARKAN ID TRANSAKSI
+    // Jika ID Transaksi ada di list selected, maka masuk Checked
+    // ATAU jika kategori mengandung 'gaji'/'salary', anggap otomatis checked.
+
+    final category = allCategories.firstWhere(
+      (c) => c.id == t.categoryId,
+      orElse: () =>
+          const Category(id: 0, name: '', icon: '', color: 0, type: ''),
+    );
+    final isGaji =
+        category.name.toLowerCase().contains('gaji') ||
+        category.name.toLowerCase().contains('salary');
+
+    if (isGaji || selectedTrxIds.contains(t.id.toString())) {
+      totalCheckedIncome += t.amount;
+    } else {
+      totalUncheckedIncome += t.amount;
     }
-  } else {
-    effectiveIds = selectedIncomeIds;
   }
-
-  // 2. Hitung Total Income Real
-  int totalFlexIncome = allTransactions
-      .where((t) {
-        DateTime tDate;
-        try {
-          tDate = t.date;
-        } catch (_) {
-          tDate = DateTime.parse(t.date.toString());
-        }
-
-        final isMonthMatch = tDate.month == now.month && tDate.year == now.year;
-        final isSelectedCategory = effectiveIds.contains(
-          t.categoryId.toString(),
-        );
-
-        return t.type == 'income' && isMonthMatch && isSelectedCategory;
-      })
-      .fold(0, (sum, t) => sum + t.amount);
 
   // --- B. HITUNG TOTAL FIXED BUDGET ---
-  int totalFixedBudget = 0;
+  int remainingFixedBudget = 0;
   for (var c in allCategories) {
     if (c.type == 'expense' && c.budget > 0) {
-      totalFixedBudget += c.budget;
+      remainingFixedBudget += c.budget;
     }
   }
 
-  // --- C. HITUNG LIMIT FLEX ---
-  int flexLimit = totalFlexIncome - totalFixedBudget;
-  if (flexLimit < 0) flexLimit = 0;
+  // --- C. ALOKASI PEMBAYARAN TAGIHAN (PERBAIKAN) ---
+  // HAPUS atau KOMENTARI logika lama yang menggunakan totalUncheckedIncome
+  /* LOGIKA LAMA (YANG BIKIN ERROR):
+  // 1. Bayar pakai Unchecked Income dulu
+  if (totalUncheckedIncome >= remainingFixedBudget) {
+    remainingFixedBudget = 0;
+  } else {
+    remainingFixedBudget -= totalUncheckedIncome;
+  }
+  */
+
+  // LOGIKA BARU:
+  // Abaikan totalUncheckedIncome sepenuhnya.
+  // Flex Limit murni = Total Checked Income - Total Fixed Budget.
+
+  int flexLimit = 0;
+
+  if (totalCheckedIncome > remainingFixedBudget) {
+    // Jika pendapatan yang dicentang lebih besar dari tagihan rutin,
+    // sisanya adalah Flex Budget.
+    flexLimit = totalCheckedIncome - remainingFixedBudget;
+  } else {
+    // Jika pendapatan yang dicentang bahkan tidak cukup bayar tagihan,
+    // maka Flex Budget 0 (Minus tidak ditampilkan di limit, tapi di sisa nanti).
+    flexLimit = 0;
+  }
 
   // --- D. HITUNG PENGELUARAN FLEX (Non-Budgeted Expenses) ---
   final budgetedCategoryIds = allCategories

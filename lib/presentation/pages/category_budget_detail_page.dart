@@ -443,7 +443,81 @@ class CategoryBudgetDetailPage extends ConsumerWidget {
           physics: const NeverScrollableScrollPhysics(),
           itemCount: filteredTransactions.length,
           itemBuilder: (context, index) {
-            return TransactionItem(transaction: filteredTransactions[index]);
+            final transaction = filteredTransactions[index];
+
+            // --- LOGIC PEMBATAS TANGGAL ---
+            bool showHeader = false;
+            if (index == 0) {
+              showHeader = true;
+            } else {
+              final prevDate = filteredTransactions[index - 1].date;
+              if (!_isSameDay(transaction.date, prevDate)) {
+                showHeader = true;
+              }
+            }
+            // -----------------------------
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // TAMPILKAN HEADER TANGGAL & TOTAL
+                if (showHeader)
+                  Builder(
+                    builder: (context) {
+                      // --- 2. HITUNG TOTAL PENGELUARAN HARI INI ---
+                      int totalDailyExpense = filteredTransactions
+                          .where((t) => _isSameDay(t.date, transaction.date))
+                          .fold(0, (sum, item) => sum + item.amount);
+
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          0, // padding disesuaikan agar rapi dlm Container parent
+                          24,
+                          0,
+                          8,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                // TANGGAL (Kiri)
+                                Text(
+                                  DateFormat(
+                                    'dd MMMM yyyy',
+                                    'id_ID',
+                                  ).format(transaction.date),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+
+                                // TOTAL (Kanan)
+                                Text(
+                                  _formatRupiah(totalDailyExpense),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            const Divider(height: 1, thickness: 0.5),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+
+                // ITEM TRANSAKSI
+                TransactionItem(transaction: transaction),
+              ],
+            );
           },
         );
       },
@@ -458,5 +532,11 @@ class CategoryBudgetDetailPage extends ConsumerWidget {
       symbol: 'Rp ',
       decimalDigits: 0,
     ).format(amount);
+  }
+
+  bool _isSameDay(DateTime date1, DateTime date2) {
+    return date1.year == date2.year &&
+        date1.month == date2.month &&
+        date1.day == date2.day;
   }
 }
