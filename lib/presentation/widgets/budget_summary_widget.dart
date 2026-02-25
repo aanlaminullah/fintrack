@@ -5,6 +5,7 @@ import '../../domain/entities/category.dart';
 import '../../domain/entities/transaction.dart';
 import '../pages/budget_detail_page.dart';
 import '../providers/flex_budget_provider.dart';
+import '../providers/wallet_provider.dart';
 
 class BudgetSummaryWidget extends ConsumerWidget {
   final List<Transaction> transactions;
@@ -18,6 +19,10 @@ class BudgetSummaryWidget extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Cek status Wallet
+    final currentWallet = ref.watch(selectedWalletProvider);
+    final isMonthlyWallet = currentWallet?.isMonthly ?? true;
+
     // 1. Filter Kategori yang punya budget
     final budgetedCategories = categories.where((c) => c.budget > 0).toList();
 
@@ -32,7 +37,7 @@ class BudgetSummaryWidget extends ConsumerWidget {
     for (var cat in budgetedCategories) {
       fixedBudget += cat.budget;
 
-      // Hitung expense hanya untuk kategori ini di bulan ini
+      // Hitung expense sesuai dengan tipe dompet (Bulanan vs Akumulasi)
       final catExpense = transactions
           .where((t) {
             DateTime tDate;
@@ -42,10 +47,12 @@ class BudgetSummaryWidget extends ConsumerWidget {
               tDate = DateTime.parse(t.date.toString());
             }
 
-            return t.categoryId == cat.id &&
-                t.type == 'expense' &&
-                tDate.month == now.month &&
-                tDate.year == now.year;
+            final isMonthMatch =
+                tDate.month == now.month && tDate.year == now.year;
+            // Jika dompet bulanan, wajib bulan ini. Jika akumulasi, abaikan filter bulan.
+            final isDateValid = isMonthlyWallet ? isMonthMatch : true;
+
+            return t.categoryId == cat.id && t.type == 'expense' && isDateValid;
           })
           .fold(0, (sum, t) => sum + t.amount);
 
@@ -120,9 +127,11 @@ class BudgetSummaryWidget extends ConsumerWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Total Budget Bulanan',
-                      style: TextStyle(
+                    Text(
+                      isMonthlyWallet
+                          ? 'Total Budget Bulanan'
+                          : 'Total Budget (Akumulasi)',
+                      style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                       ),

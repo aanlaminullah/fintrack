@@ -8,6 +8,7 @@ import '../../domain/entities/category.dart';
 import '../../domain/entities/transaction.dart' as entity;
 import '../providers/category_provider.dart';
 import '../providers/transaction_provider.dart';
+import '../providers/wallet_provider.dart'; // PERBAIKAN: Import ditambahkan
 import '../../core/utils/app_icons.dart';
 
 class AddTransactionPage extends ConsumerStatefulWidget {
@@ -22,17 +23,11 @@ class AddTransactionPage extends ConsumerStatefulWidget {
 class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
   final _formKey = GlobalKey<FormState>();
 
-  // Variabel Timer untuk hapus cepat
   Timer? _deleteTimer;
-
-  // Controller
   final _titleController = TextEditingController();
   final _amountController = TextEditingController();
-
-  // Focus Nodes
   final FocusNode _titleFocusNode = FocusNode();
 
-  // State
   String _type = 'expense';
   DateTime _selectedDate = DateTime.now();
   Category? _selectedCategory;
@@ -114,8 +109,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
     _amountController.text = formatter.format(value);
   }
 
-  // --- LOGIC SUBMIT (DENGAN SAFETY NET) ---
-
   void _submitData() async {
     if (_formKey.currentState!.validate()) {
       if (_selectedCategory == null) {
@@ -136,39 +129,38 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
         return;
       }
 
-      // --- SAFETY CHECK (PERINGATAN CASHFLOW) ---
-      // Hanya cek jika ini Pengeluaran (Expense)
       if (_type == 'expense') {
         final shouldProceed = await _checkSafetyNet(amount);
-        if (!shouldProceed) return; // Batal simpan jika user bilang "Batal"
+        if (!shouldProceed) return;
       }
 
-      // --- PROSES SIMPAN ---
       _saveToDatabase(title, amount);
     }
   }
 
   Future<bool> _checkSafetyNet(int newAmount) async {
-    // Ambil data transaksi dari Provider
     final transactionState = ref.read(transactionListProvider);
+    final currentWallet = ref.read(
+      selectedWalletProvider,
+    ); // Sekarang Terdefinisi
+    final isMonthlyWallet = currentWallet?.isMonthly ?? true;
 
-    // Jika data belum siap, lewati cek (langsung simpan)
     if (!transactionState.hasValue) return true;
 
     final allTransactions = transactionState.value!;
-
-    // Filter Bulan Ini
     final now = DateTime.now();
-    final thisMonthTransactions = allTransactions.where((t) {
-      return t.date.month == now.month && t.date.year == now.year;
-    }).toList();
 
-    // 1. CEK GLOBAL (SISA GAJI)
+    final activeTransactions = isMonthlyWallet
+        ? allTransactions.where((t) {
+            return t.date.month == now.month && t.date.year == now.year;
+          }).toList()
+        : allTransactions;
+
+    // 1. CEK GLOBAL
     int totalIncome = 0;
     int totalExpense = 0;
 
-    for (var t in thisMonthTransactions) {
-      // Jika kita sedang Edit, jangan hitung transaksi yang sedang diedit ini
+    for (var t in activeTransactions) {
       if (widget.transactionToEdit != null &&
           t.id == widget.transactionToEdit!.id)
         continue;
@@ -182,14 +174,14 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
     final currentBalance = totalIncome - totalExpense;
     final balanceAfterTransaction = currentBalance - newAmount;
 
-    // 2. CEK KATEGORI (OVER BUDGET)
+    // 2. CEK KATEGORI
     bool isOverCategory = false;
     String categoryWarning = '';
 
     if (_selectedCategory!.budget > 0) {
       int categoryExpense = 0;
-      for (var t in thisMonthTransactions) {
-        // Jangan hitung transaksi yang sedang diedit
+      // PERBAIKAN: Menggunakan activeTransactions, bukan thisMonthTransactions
+      for (var t in activeTransactions) {
         if (widget.transactionToEdit != null &&
             t.id == widget.transactionToEdit!.id)
           continue;
@@ -199,21 +191,20 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
         }
       }
 
-      if (categoryExpense + newAmount > _selectedCategory!.budget) {
+      // PERBAIKAN: Menambahkan .toInt() untuk komparasi tipe data
+      if (categoryExpense + newAmount > _selectedCategory!.budget.toInt()) {
         isOverCategory = true;
         categoryWarning =
             'Budget ${_selectedCategory!.name} akan jebol (Over)!';
       }
     }
 
-    // --- LOGIKA MUNCUL POPUP ---
-    // Muncul jika: Sisa Uang Jadi Minus ATAU Budget Kategori Jebol
     if (balanceAfterTransaction < 0 || isOverCategory) {
       return await showDialog<bool>(
             context: context,
             builder: (ctx) => AlertDialog(
-              title: Row(
-                children: const [
+              title: const Row(
+                children: [
                   Icon(Icons.warning_amber_rounded, color: Colors.orange),
                   SizedBox(width: 8),
                   Text('Peringatan Keuangan'),
@@ -224,23 +215,20 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (balanceAfterTransaction < 0) ...[
-                    Text(
-                      '⚠️ SISA GAJI TIDAK CUKUP!',
+                    const Text(
+                      '⚠️ SISA SALDO TIDAK CUKUP!',
                       style: TextStyle(
                         color: Colors.red,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 8),
+                    Text('Saldo tersedia: ${_formatRupiah(currentBalance)}'),
                     Text(
-                      'Sisa uang bebas Anda saat ini: ${_formatRupiah(currentBalance)}',
-                    ),
-                    Text(
-                      'Setelah transaksi ini: ${_formatRupiah(balanceAfterTransaction)} (MINUS)',
+                      'Setelah transaksi: ${_formatRupiah(balanceAfterTransaction)} (MINUS)',
                     ),
                     const Divider(),
                   ],
-
                   if (isOverCategory) ...[
                     Text(
                       '⚠️ $categoryWarning',
@@ -251,18 +239,17 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                     ),
                     const SizedBox(height: 8),
                   ],
-
                   const SizedBox(height: 10),
                   const Text('Apakah Anda yakin tetap ingin menyimpan?'),
                 ],
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(ctx, false), // BATAL
+                  onPressed: () => Navigator.pop(ctx, false),
                   child: const Text('Batal'),
                 ),
                 ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx, true), // LANJUT (NEKAD)
+                  onPressed: () => Navigator.pop(ctx, true),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
                   child: const Text(
                     'Tetap Simpan',
@@ -272,10 +259,10 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
               ],
             ),
           ) ??
-          false; // Default false (batal) jika dialog ditutup paksa
+          false;
     }
 
-    return true; // Aman, lanjut simpan
+    return true;
   }
 
   void _saveToDatabase(String title, int amount) async {
@@ -291,14 +278,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
         await ref
             .read(transactionListProvider.notifier)
             .addTransaction(newTransaction);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Transaksi berhasil disimpan!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
       } else {
         final updatedTransaction = entity.Transaction(
           id: widget.transactionToEdit!.id,
@@ -311,14 +290,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
         await ref
             .read(transactionListProvider.notifier)
             .updateTransaction(updatedTransaction);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Perubahan berhasil disimpan!'),
-              backgroundColor: Colors.teal,
-            ),
-          );
-        }
       }
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -337,8 +308,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
       decimalDigits: 0,
     ).format(amount);
   }
-
-  // --- UI COMPONENTS (SAMA SEPERTI SEBELUMNYA) ---
 
   void _showCategoryPicker() {
     setState(() => _isAmountFocused = false);
@@ -370,7 +339,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                         color: Colors.grey[300],
                         borderRadius: BorderRadius.circular(10),
                       ),
-                    ), // Cont
+                    ),
                     const Padding(
                       padding: EdgeInsets.all(16.0),
                       child: Text(
@@ -468,7 +437,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
   void _presentDatePicker() {
     setState(() => _isAmountFocused = false);
     FocusManager.instance.primaryFocus?.unfocus();
-
     showDatePicker(
       context: context,
       initialDate: _selectedDate,
@@ -521,7 +489,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // SEGMENTED BUTTON
                     Center(
                       child: SegmentedButton<String>(
                         segments: const [
@@ -537,7 +504,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                           ),
                         ],
                         selected: {_type},
-                        onSelectionChanged: (Set<String> newSelection) {
+                        onSelectionChanged: (newSelection) {
                           setState(() {
                             _type = newSelection.first;
                             _selectedCategory = null;
@@ -547,19 +514,16 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                         style: ButtonStyle(
                           backgroundColor:
                               WidgetStateProperty.resolveWith<Color>((states) {
-                                if (states.contains(WidgetState.selected)) {
+                                if (states.contains(WidgetState.selected))
                                   return _type == 'expense'
                                       ? Colors.red.shade100
                                       : Colors.green.shade100;
-                                }
                                 return Colors.transparent;
                               }),
                         ),
                       ),
                     ),
                     const SizedBox(height: 24),
-
-                    // JUDUL INPUT
                     TextFormField(
                       controller: _titleController,
                       focusNode: _titleFocusNode,
@@ -589,8 +553,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                           : null,
                     ),
                     const SizedBox(height: 16),
-
-                    // NOMINAL INPUT
                     TextFormField(
                       controller: _amountController,
                       readOnly: true,
@@ -605,7 +567,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                       ),
                       decoration: InputDecoration(
                         labelText: 'Nominal (Rp)',
-                        hintText: '0',
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -617,12 +578,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                                   width: 2,
                                 ),
                               )
-                            : OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                  color: Colors.grey,
-                                ),
-                              ),
+                            : null,
                         prefixIcon: const Icon(Icons.attach_money),
                       ),
                       validator: (value) => (value == null || value.isEmpty)
@@ -630,8 +586,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                           : null,
                     ),
                     const SizedBox(height: 16),
-
-                    // KATEGORI INPUT
                     InkWell(
                       onTap: _showCategoryPicker,
                       borderRadius: BorderRadius.circular(12),
@@ -670,8 +624,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                       ),
                     ),
                     const SizedBox(height: 16),
-
-                    // TANGGAL INPUT
                     InkWell(
                       onTap: _presentDatePicker,
                       child: InputDecorator(
@@ -692,8 +644,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                       ),
                     ),
                     const SizedBox(height: 32),
-
-                    // TOMBOL SIMPAN
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -720,8 +670,6 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
               ),
             ),
           ),
-
-          // CUSTOM NUMPAD
           if (_isAmountFocused)
             Container(
               color: Colors.grey[100],

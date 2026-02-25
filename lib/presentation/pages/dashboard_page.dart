@@ -27,6 +27,7 @@ import '../../data/datasources/local/database_helper.dart';
 import '../../core/services/report_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:typed_data';
+import 'wallet_list_page.dart'; // Tambahkan ini di deretan import
 
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
@@ -133,6 +134,21 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                         );
                       },
                     ),
+                    _buildModernMenuItem(
+                      context,
+                      title: 'Kelola Akun (Wallet)',
+                      icon: Icons.account_balance_wallet_outlined,
+                      color: Colors.indigo,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const WalletListPage(),
+                          ),
+                        );
+                      },
+                    ),
                     const SizedBox(height: 10),
                     const Divider(),
                     const SizedBox(height: 10),
@@ -212,9 +228,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     ref
                         .read(selectedWalletProvider.notifier)
                         .selectWallet(newValue);
-                  } else {
-                    // Tambah Wallet Baru (Value null)
-                    _showAddWalletDialog(context, ref);
                   }
                 },
                 items: [
@@ -236,24 +249,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       ),
                     );
                   }).toList(),
-                  // Opsi Tambah Akun
-                  const DropdownMenuItem<Wallet>(
-                    value: null,
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.add_circle_outline,
-                          color: Colors.blue,
-                          size: 18,
-                        ),
-                        SizedBox(width: 8),
-                        Text(
-                          "Tambah Akun",
-                          style: TextStyle(color: Colors.blue),
-                        ),
-                      ],
-                    ),
-                  ),
                 ],
               ),
             );
@@ -518,7 +513,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   onPressed: () async {
                     if (nameController.text.isNotEmpty) {
                       await ref
-                          .read(selectedWalletProvider.notifier)
+                          .read(walletListProvider.notifier)
                           .addWallet(nameController.text, isMonthly);
                       ref.invalidate(walletListProvider); // Refresh dropdown
                       Navigator.pop(context);

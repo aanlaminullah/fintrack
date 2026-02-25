@@ -120,19 +120,37 @@ final dashboardSummaryProvider =
       final currentWallet = ref.watch(selectedWalletProvider);
 
       return transactionsAsync.whenData((transactions) {
-        int income = 0;
-        int expense = 0;
+        final isMonthlyWallet = currentWallet?.isMonthly ?? true;
 
-        // Hitung total dari list transaksi yang SUDAH difilter oleh provider di atas
+        int totalIncome = 0;
+        int totalExpense = 0;
+        int monthlyIncome = 0;
+        int monthlyExpense = 0;
+
+        final now = DateTime.now();
+
         for (var t in transactions) {
-          if (t.type == 'income') income += t.amount;
-          if (t.type == 'expense') expense += t.amount;
+          if (t.type == 'income') totalIncome += t.amount;
+          if (t.type == 'expense') totalExpense += t.amount;
+
+          DateTime tDate;
+          try {
+            tDate = t.date;
+          } catch (_) {
+            tDate = DateTime.parse(t.date.toString());
+          }
+
+          if (tDate.year == now.year && tDate.month == now.month) {
+            if (t.type == 'income') monthlyIncome += t.amount;
+            if (t.type == 'expense') monthlyExpense += t.amount;
+          }
         }
 
         return {
-          'income': income,
-          'expense': expense,
-          'total': income - expense,
+          // Jika bulanan, tampilkan data bulan ini. Jika akumulasi, tampilkan all-time.
+          'income': isMonthlyWallet ? monthlyIncome : totalIncome,
+          'expense': isMonthlyWallet ? monthlyExpense : totalExpense,
+          'total': totalIncome - totalExpense,
         };
       });
     });

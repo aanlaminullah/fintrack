@@ -1,35 +1,27 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/datasources/local/database_helper.dart';
 import '../../domain/entities/wallet.dart';
+import 'transaction_provider.dart';
+import 'category_provider.dart';
 
-// 1. Provider List Semua Wallet
-final walletListProvider = FutureProvider<List<Wallet>>((ref) async {
-  final db = await DatabaseHelper.instance.database;
-  final result = await db.query('wallets');
-  return result.map((json) => Wallet.fromMap(json)).toList();
-});
+// 1. Provider List Semua Wallet (Sekarang menggunakan AsyncNotifier agar bisa CRUD)
+final walletListProvider =
+    AsyncNotifierProvider<WalletListNotifier, List<Wallet>>(() {
+      return WalletListNotifier();
+    });
 
-// 2. Provider Wallet yang SEDANG DIPILIH (State)
-class SelectedWalletNotifier extends Notifier<Wallet?> {
+class WalletListNotifier extends AsyncNotifier<List<Wallet>> {
   @override
-  Wallet? build() {
-    return null;
+  Future<List<Wallet>> build() async {
+    return _fetchWallets();
   }
 
-  // Load wallet pertama kali (Default ke ID 1 atau yang pertama ketemu)
-  Future<void> loadInitial() async {
+  Future<List<Wallet>> _fetchWallets() async {
     final db = await DatabaseHelper.instance.database;
     final result = await db.query('wallets');
-    if (result.isNotEmpty) {
-      state = Wallet.fromMap(result.first);
-    }
+    return result.map((json) => Wallet.fromMap(json)).toList();
   }
 
-  void selectWallet(Wallet wallet) {
-    state = wallet;
-  }
-
-  // --- PERBAIKAN DI SINI: Auto-Generate Kategori Default ---
   Future<void> addWallet(String name, bool isMonthly) async {
     final db = await DatabaseHelper.instance.database;
 
@@ -41,7 +33,6 @@ class SelectedWalletNotifier extends Notifier<Wallet?> {
 
     // 2. Siapkan Kategori Default untuk Wallet ini
     final List<Map<String, dynamic>> defaultCategories = [
-      // PENGELUARAN
       {
         'name': 'Makan',
         'icon': 'fastfood',
@@ -87,8 +78,6 @@ class SelectedWalletNotifier extends Notifier<Wallet?> {
         'is_weekly': 0,
         'wallet_id': newWalletId,
       },
-
-      // PEMASUKAN
       {
         'name': 'Gaji',
         'icon': 'attach_money',
@@ -107,25 +96,72 @@ class SelectedWalletNotifier extends Notifier<Wallet?> {
         'is_weekly': 0,
         'wallet_id': newWalletId,
       },
-      {
-        'name': 'Bonus',
-        'icon': 'card_giftcard',
-        'color': 0xFFBA68C8,
-        'type': 'income',
-        'budget': 0,
-        'is_weekly': 0,
-        'wallet_id': newWalletId,
-      },
     ];
 
-    // 3. Masukkan Kategori ke Database
     for (var cat in defaultCategories) {
       await db.insert('categories', cat);
     }
 
-    // 4. Otomatis pilih wallet baru tersebut (Opsional)
-    final newWallet = Wallet(id: newWalletId, name: name, isMonthly: isMonthly);
-    state = newWallet;
+    // Refresh list wallet
+    state = AsyncValue.data(await _fetchWallets());
+  }
+
+  Future<void> updateWallet(Wallet wallet) async {
+    final db = await DatabaseHelper.instance.database;
+    await db.update(
+      'wallets',
+      wallet.toMap(),
+      where: 'id = ?',
+      whereArgs: [wallet.id],
+    );
+
+    // Update state selected wallet jika yang diedit adalah yang sedang aktif
+    final currentSelected = ref.read(selectedWalletProvider);
+    if (currentSelected?.id == wallet.id) {
+      ref.read(selectedWalletProvider.notifier).selectWallet(wallet);
+    }
+
+    state = AsyncValue.data(await _fetchWallets());
+  }
+
+  Future<void> deleteWallet(int id) async {
+    final db = await DatabaseHelper.instance.database;
+    // Berkat ON DELETE CASCADE di database_helper, kategori dan transaksi terkait akan otomatis terhapus
+    await db.delete('wallets', where: 'id = ?', whereArgs: [id]);
+
+    final updatedWallets = await _fetchWallets();
+    state = AsyncValue.data(updatedWallets);
+
+    // Jika wallet yang dihapus adalah wallet yang sedang aktif, pindah ke wallet pertama
+    final currentSelected = ref.read(selectedWalletProvider);
+    if (currentSelected?.id == id && updatedWallets.isNotEmpty) {
+      ref
+          .read(selectedWalletProvider.notifier)
+          .selectWallet(updatedWallets.first);
+      ref.invalidate(transactionListProvider);
+      ref.invalidate(dashboardSummaryProvider);
+      ref.invalidate(categoryListProvider);
+    }
+  }
+}
+
+// 2. Provider Wallet yang SEDANG DIPILIH (State)
+class SelectedWalletNotifier extends Notifier<Wallet?> {
+  @override
+  Wallet? build() {
+    return null;
+  }
+
+  Future<void> loadInitial() async {
+    final db = await DatabaseHelper.instance.database;
+    final result = await db.query('wallets');
+    if (result.isNotEmpty) {
+      state = Wallet.fromMap(result.first);
+    }
+  }
+
+  void selectWallet(Wallet wallet) {
+    state = wallet;
   }
 }
 
