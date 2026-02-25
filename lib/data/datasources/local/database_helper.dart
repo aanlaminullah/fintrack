@@ -1,12 +1,13 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'dart:async';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
-  // VERSI NAIK JADI 3
-  static const int _dbVersion = 3;
+  // VERSI DB 4 (Multi-Wallet)
+  static const int _dbVersion = 4;
 
   DatabaseHelper._init();
 
@@ -24,26 +25,63 @@ class DatabaseHelper {
       path,
       version: _dbVersion,
       onCreate: _createDB,
-      onUpgrade: _onUpgrade, // <--- Handle Migrasi
+      onUpgrade: _onUpgrade,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
     );
   }
 
-  // MIGRASI DATABASE (Agar data lama tidak hilang)
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    // Migrasi Versi 2 (Budget)
     if (oldVersion < 2) {
       await db.execute(
         'ALTER TABLE categories ADD COLUMN budget INTEGER DEFAULT 0',
       );
     }
-    // Update Versi 3: Tambah kolom is_weekly
+    // Migrasi Versi 3 (Weekly Mode)
     if (oldVersion < 3) {
       await db.execute(
         'ALTER TABLE categories ADD COLUMN is_weekly INTEGER DEFAULT 0',
       );
-      print("Database upgraded to v3: Added is_weekly column");
+    }
+    // Migrasi Versi 4 (Multi-Wallet)
+    if (oldVersion < 4) {
+      // 1. Buat Tabel Wallets
+      await db.execute('''
+        CREATE TABLE wallets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          is_monthly INTEGER DEFAULT 1
+        )
+      ''');
+
+      // 2. Masukkan Wallet Default
+      int defaultWalletId = await db.insert('wallets', {
+        'name': 'Dompet Harian',
+        'is_monthly': 1,
+      });
+
+      // 3. Tambah kolom wallet_id
+      try {
+        await db.execute('ALTER TABLE categories ADD COLUMN wallet_id INTEGER');
+      } catch (
+        _
+      ) {} // Abaikan jika kolom sudah ada (kadang terjadi saat hot restart)
+
+      try {
+        await db.execute(
+          'ALTER TABLE transactions ADD COLUMN wallet_id INTEGER',
+        );
+      } catch (_) {}
+
+      // 4. Set data lama ke wallet default
+      await db.execute(
+        'UPDATE categories SET wallet_id = $defaultWalletId WHERE wallet_id IS NULL',
+      );
+      await db.execute(
+        'UPDATE transactions SET wallet_id = $defaultWalletId WHERE wallet_id IS NULL',
+      );
     }
   }
 
@@ -53,7 +91,16 @@ class DatabaseHelper {
     const intType = 'INTEGER NOT NULL';
     const textNullable = 'TEXT';
 
-    // Tabel Categories (Lengkap dengan is_weekly)
+    // 1. Tabel Wallets
+    await db.execute('''
+      CREATE TABLE wallets (
+        id $idType,
+        name $textType,
+        is_monthly INTEGER DEFAULT 1
+      )
+    ''');
+
+    // 2. Tabel Categories
     await db.execute('''
       CREATE TABLE categories (
         id $idType,
@@ -62,10 +109,12 @@ class DatabaseHelper {
         color $intType,
         type $textType,
         budget INTEGER DEFAULT 0,
-        is_weekly INTEGER DEFAULT 0
+        is_weekly INTEGER DEFAULT 0,
+        wallet_id INTEGER NOT NULL REFERENCES wallets(id) ON DELETE CASCADE
       )
     ''');
 
+    // 3. Tabel Transactions
     await db.execute('''
       CREATE TABLE transactions (
         id $idType,
@@ -75,14 +124,22 @@ class DatabaseHelper {
         category_id $intType,
         date $textType,
         note $textNullable,
+        wallet_id INTEGER NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
         FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE SET NULL
       )
     ''');
 
-    await _seedCategories(db);
+    await _seedWalletsAndCategories(db);
   }
 
-  Future _seedCategories(Database db) async {
+  Future _seedWalletsAndCategories(Database db) async {
+    // 1. Buat Wallet Default
+    int walletId = await db.insert('wallets', {
+      'name': 'Dompet Harian',
+      'is_monthly': 1,
+    });
+
+    // 2. Seed Categories
     final List<Map<String, dynamic>> defaultCategories = [
       {
         'name': 'Makan',
@@ -91,6 +148,7 @@ class DatabaseHelper {
         'type': 'expense',
         'budget': 0,
         'is_weekly': 0,
+        'wallet_id': walletId,
       },
       {
         'name': 'Transport',
@@ -99,6 +157,7 @@ class DatabaseHelper {
         'type': 'expense',
         'budget': 0,
         'is_weekly': 0,
+        'wallet_id': walletId,
       },
       {
         'name': 'Belanja',
@@ -107,6 +166,7 @@ class DatabaseHelper {
         'type': 'expense',
         'budget': 0,
         'is_weekly': 0,
+        'wallet_id': walletId,
       },
       {
         'name': 'Hiburan',
@@ -115,6 +175,7 @@ class DatabaseHelper {
         'type': 'expense',
         'budget': 0,
         'is_weekly': 0,
+        'wallet_id': walletId,
       },
       {
         'name': 'Gaji',
@@ -123,6 +184,7 @@ class DatabaseHelper {
         'type': 'income',
         'budget': 0,
         'is_weekly': 0,
+        'wallet_id': walletId,
       },
       {
         'name': 'Freelance',
@@ -131,6 +193,7 @@ class DatabaseHelper {
         'type': 'income',
         'budget': 0,
         'is_weekly': 0,
+        'wallet_id': walletId,
       },
     ];
 
@@ -144,11 +207,14 @@ class DatabaseHelper {
     db.close();
   }
 
+  // --- HELPER METHODS UNTUK BACKUP & RESTORE ---
+
   Future<String> getDbPath() async {
     final dbPath = await getDatabasesPath();
     return join(dbPath, 'fintrack.db');
   }
 
+  // Menutup database agar file bisa ditimpa (Restore)
   Future<void> closeForRestore() async {
     final db = _database;
     if (db != null) {
@@ -157,11 +223,8 @@ class DatabaseHelper {
     }
   }
 
+  // Alias untuk closeForRestore (dipanggil di Dashboard)
   Future<void> closeDatabase() async {
-    final db = _database;
-    if (db != null) {
-      await db.close();
-      _database = null;
-    }
+    await closeForRestore();
   }
 }

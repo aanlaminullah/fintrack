@@ -5,16 +5,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/transaction_provider.dart';
 import '../providers/chart_provider.dart';
 import '../providers/category_provider.dart';
+import '../providers/wallet_provider.dart'; // Import Wallet Provider
 
 // Import Widgets & Pages
 import '../widgets/summary_card.dart';
 import '../widgets/transaction_item.dart';
 import '../widgets/expense_pie_chart.dart';
-import '../widgets/budget_summary_widget.dart'; // Widget Baru
+import '../widgets/budget_summary_widget.dart';
 import 'add_transaction_page.dart';
 import 'category_list_page.dart';
 import 'transaction_search_page.dart';
 import 'expense_analysis_page.dart';
+import '../../domain/entities/wallet.dart'; // Import Entity Wallet
 
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
@@ -39,6 +41,15 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   int _currentPage = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // Load wallet pertama kali saat aplikasi dibuka
+    Future.microtask(
+      () => ref.read(selectedWalletProvider.notifier).loadInitial(),
+    );
+  }
+
+  @override
   void dispose() {
     _pageController.dispose();
     super.dispose();
@@ -50,10 +61,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final transactionListState = ref.watch(transactionListProvider);
     final categoryListState = ref.watch(categoryListProvider);
 
+    // Data Wallet untuk Dropdown
+    final currentWallet = ref.watch(selectedWalletProvider);
+    final walletsAsync = ref.watch(walletListProvider);
+
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: Colors.grey[50],
-
       // --- END DRAWER (MENU) ---
       endDrawer: Drawer(
         backgroundColor: Colors.white,
@@ -134,7 +148,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       title: 'Restore Data (Import)',
                       icon: Icons.download_for_offline,
                       color: Colors.orange,
-                      onTap: _importData, // Logic Restore dipanggil disini
+                      onTap: _importData,
                     ),
                     const SizedBox(height: 10),
                     const Divider(),
@@ -144,10 +158,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       title: 'Laporan Keuangan',
                       icon: Icons.print,
                       color: Colors.purple,
-                      onTap: () => _showExportOptions(
-                        context,
-                        ref,
-                      ), // Logic Laporan dipanggil disini
+                      onTap: () => _showExportOptions(context, ref),
                     ),
                   ],
                 ),
@@ -166,7 +177,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       ),
                     ),
                     Text(
-                      'Versi 1.0.0',
+                      'Versi 1.1.0 (Multi-Wallet)',
                       style: TextStyle(color: Colors.grey[400], fontSize: 12),
                     ),
                   ],
@@ -180,18 +191,75 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Halo, Aan!',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-            ),
-            Text(
-              'FinTrack',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-            ),
-          ],
+        // --- DROPDOWN WALLET DI APPBAR ---
+        title: walletsAsync.when(
+          data: (wallets) {
+            if (currentWallet == null) return const Text("FinTrack");
+
+            return DropdownButtonHideUnderline(
+              child: DropdownButton<Wallet>(
+                value: currentWallet,
+                dropdownColor: Colors.white,
+                icon: const Icon(Icons.keyboard_arrow_down, color: Colors.teal),
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+                onChanged: (Wallet? newValue) {
+                  if (newValue != null) {
+                    // Ganti Wallet
+                    ref
+                        .read(selectedWalletProvider.notifier)
+                        .selectWallet(newValue);
+                  } else {
+                    // Tambah Wallet Baru (Value null)
+                    _showAddWalletDialog(context, ref);
+                  }
+                },
+                items: [
+                  ...wallets.map<DropdownMenuItem<Wallet>>((Wallet wallet) {
+                    return DropdownMenuItem<Wallet>(
+                      value: wallet,
+                      child: Row(
+                        children: [
+                          Icon(
+                            wallet.isMonthly
+                                ? Icons.account_balance_wallet
+                                : Icons.savings,
+                            color: Colors.teal,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(wallet.name),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                  // Opsi Tambah Akun
+                  const DropdownMenuItem<Wallet>(
+                    value: null,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.add_circle_outline,
+                          color: Colors.blue,
+                          size: 18,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          "Tambah Akun",
+                          style: TextStyle(color: Colors.blue),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+          loading: () => const Text("Loading..."),
+          error: (_, __) => const Text("Error"),
         ),
         actions: [
           IconButton(
@@ -206,6 +274,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           ref.invalidate(dashboardSummaryProvider);
           ref.invalidate(dashboardChartProvider);
           ref.invalidate(monthlyChartProvider);
+          ref.invalidate(walletListProvider); // Refresh wallet juga
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -346,7 +415,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              'Belum ada transaksi',
+                              'Belum ada transaksi di akun ini',
                               style: TextStyle(color: Colors.grey[400]),
                             ),
                             const SizedBox(height: 20),
@@ -402,7 +471,70 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
-  // --- HELPER WIDGETS ---
+  // --- DIALOG TAMBAH WALLET ---
+  void _showAddWalletDialog(BuildContext context, WidgetRef ref) {
+    final nameController = TextEditingController();
+    bool isMonthly = true;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Tambah Akun Baru'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nama Akun',
+                      hintText: 'Mis: Tabungan Nikah',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  SwitchListTile(
+                    title: const Text('Mode Bulanan?'),
+                    subtitle: Text(
+                      isMonthly
+                          ? 'Ya (Reset tiap bulan)'
+                          : 'Tidak (Akumulasi/Tabungan)',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    value: isMonthly,
+                    onChanged: (val) => setState(() => isMonthly = val),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Batal'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (nameController.text.isNotEmpty) {
+                      await ref
+                          .read(selectedWalletProvider.notifier)
+                          .addWallet(nameController.text, isMonthly);
+                      ref.invalidate(walletListProvider); // Refresh dropdown
+                      Navigator.pop(context);
+                    }
+                  },
+                  child: const Text('Simpan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // --- HELPER & BACKUP METHODS (Sama seperti sebelumnya) ---
   Widget _buildModernMenuItem(
     BuildContext context, {
     required String title,

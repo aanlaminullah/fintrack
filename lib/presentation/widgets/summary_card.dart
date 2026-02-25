@@ -17,7 +17,8 @@ class SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24), // Padding agak diperbesar
+      // UBAH 1: Kurangi padding utama dari 24 ke 20 agar lebih lega
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF009688), Color(0xFF004D40)],
@@ -36,56 +37,74 @@ class SummaryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // BAGIAN ATAS: Judul dan Saldo Utama
+          // BAGIAN ATAS: Judul
           const Text(
             'Total Saldo',
-            style: TextStyle(color: Colors.white70, fontSize: 16),
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
+            ), // Sedikit perkecil font
           ),
-          const SizedBox(height: 8),
-
-          // Menggunakan Expanded/Flexible agar font bisa menyesuaikan
+          const SizedBox(height: 4), // Kurangi jarak
+          // BAGIAN TENGAH: Saldo Utama
           Expanded(
             child: Align(
-              alignment: Alignment
-                  .centerLeft, // Saldo tetap di kiri tapi vertikal center di area atas
-              child: Text(
-                formatRupiah(totalBalance),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 34, // Font diperbesar
-                  fontWeight: FontWeight.bold,
+              alignment: Alignment.centerLeft,
+              child: FittedBox(
+                // Tambahkan FittedBox agar font otomatis mengecil jika kepanjangan/sempit
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  formatRupiah(totalBalance),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    // UBAH 2: Kurangi ukuran font saldo dari 34 ke 30 agar tidak overflow
+                    fontSize: 30,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                overflow: TextOverflow.ellipsis,
               ),
             ),
           ),
 
-          // BAGIAN BAWAH: Income & Expense (Pemasukan/Pengeluaran)
+          const SizedBox(height: 8),
+
+          // BAGIAN BAWAH: Income & Expense
           Container(
-            padding: const EdgeInsets.all(12),
+            // UBAH 3: Kurangi padding vertikal kontainer bawah
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.1),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _buildIndicator(
-                  icon: Icons.arrow_downward,
-                  color: Colors.greenAccent,
-                  label: 'Pemasukan',
-                  amount: income,
+                // Pemasukan
+                Expanded(
+                  child: _buildIndicator(
+                    icon: Icons.arrow_downward,
+                    color: Colors.greenAccent,
+                    label: 'Pemasukan',
+                    amount: income,
+                  ),
                 ),
+
+                // Garis Pemisah
                 Container(
                   width: 1,
-                  height: 40,
+                  height: 30, // Sedikit pendekkan garis
                   color: Colors.white24,
-                ), // Garis pemisah
-                _buildIndicator(
-                  icon: Icons.arrow_upward,
-                  color: Colors.redAccent,
-                  label: 'Pengeluaran',
-                  amount: expense,
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+
+                // Pengeluaran
+                Expanded(
+                  child: _buildIndicator(
+                    icon: Icons.arrow_upward,
+                    color: Colors.redAccent,
+                    label: 'Pengeluaran',
+                    amount: expense,
+                  ),
                 ),
               ],
             ),
@@ -109,25 +128,35 @@ class SummaryCard extends StatelessWidget {
             color: color.withOpacity(0.2),
             shape: BoxShape.circle,
           ),
-          child: Icon(icon, color: color, size: 18),
+          child: Icon(icon, color: color, size: 16), // Perkecil icon sedikit
         ),
-        const SizedBox(width: 10),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-            Text(
-              formatRupiah(amount),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+        const SizedBox(width: 8),
+        Expanded(
+          // Gunakan Expanded agar teks tidak menabrak kanan jika nominal panjang
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-          ],
+              FittedBox(
+                // FittedBox agar nominal panjang tidak error overflow
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  formatRupiah(amount),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );

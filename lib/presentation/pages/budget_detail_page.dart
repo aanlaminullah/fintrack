@@ -4,12 +4,14 @@ import 'package:intl/intl.dart';
 
 import '../../domain/entities/category.dart';
 import '../../domain/entities/transaction.dart';
+import '../../domain/entities/wallet.dart'; // Import Wallet
 import '../../core/utils/app_icons.dart';
 import '../providers/category_provider.dart';
 import '../providers/usecase_providers.dart';
-import '../providers/flex_budget_provider.dart'; // Import Provider
-import 'flex_budget_detail_page.dart'; // Import Page
-import 'category_budget_detail_page.dart'; // Import Details Page
+import '../providers/flex_budget_provider.dart'; // Provider Flex
+import '../providers/wallet_provider.dart'; // Provider Wallet
+import 'flex_budget_detail_page.dart'; // Halaman Detail Flex
+import 'category_budget_detail_page.dart'; // <--- Tambahkan import ini
 
 class BudgetDetailPage extends ConsumerStatefulWidget {
   final List<Transaction> transactions;
@@ -30,6 +32,7 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
   Widget build(BuildContext context) {
     final categoryListState = ref.watch(categoryListProvider);
     final flexState = ref.watch(flexBudgetCalculationProvider);
+    final currentWallet = ref.watch(selectedWalletProvider);
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -42,28 +45,35 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
       ),
       body: categoryListState.when(
         data: (latestCategories) {
+          // Filter kategori yang punya budget
           var budgetedCategories = latestCategories
               .where((c) => c.budget > 0)
               .toList();
 
+          // Sorting ID Ascending
           budgetedCategories.sort((a, b) => (a.id ?? 0).compareTo(b.id ?? 0));
 
-          // KITA AKAN MERENDER 1 ITEM TAMBAHAN (FLEX) + LIST KATEGORI FIXED
-          final totalItemCount = budgetedCategories.length + 1;
+          if (currentWallet == null) return const SizedBox.shrink();
+
+          // Total Item = Flex Card (1) + Kategori Fixed (n)
+          final totalItems = budgetedCategories.length + 1;
 
           return ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: totalItemCount,
+            itemCount: totalItems,
             itemBuilder: (context, index) {
-              // --- ITEM 0: FLEX BUDGET CARD (KHUSUS) ---
+              // --- ITEM 0: FLEX BUDGET CARD ---
               if (index == 0) {
                 return _buildFlexBudgetCard(context, flexState);
               }
 
-              // --- ITEM SELANJUTNYA: KATEGORI BIASA ---
-              // Index dikurangi 1 karena index 0 dipakai Flex
+              // --- ITEM LAIN: KATEGORI FIXED ---
               final category = budgetedCategories[index - 1];
-              return _buildBudgetCard(category, widget.transactions);
+              return _buildBudgetCard(
+                category,
+                widget.transactions,
+                currentWallet,
+              );
             },
           );
         },
@@ -73,7 +83,7 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
     );
   }
 
-  // --- WIDGET CARD KHUSUS FLEX BUDGET ---
+  // --- WIDGET FLEX BUDGET ---
   Widget _buildFlexBudgetCard(BuildContext context, FlexBudgetState state) {
     Color statusColor = Colors.teal;
     if (state.percentage >= 1.0) {
@@ -85,13 +95,9 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color:
-            Colors.white, // Bisa diganti warna spesial misal Colors.indigo[50]
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.indigo.withOpacity(0.5),
-          width: 1.5,
-        ), // Border pembeda
+        border: Border.all(color: Colors.indigo.withOpacity(0.5), width: 1.5),
         boxShadow: [
           BoxShadow(
             color: Colors.indigo.withOpacity(0.1),
@@ -105,7 +111,6 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: () {
-            // NAVIGASI KE FLEX DETAIL
             Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const FlexBudgetDetailPage()),
@@ -213,13 +218,24 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
     );
   }
 
-  Widget _buildBudgetCard(Category category, List<Transaction> transactions) {
-    final bool isWeekly = category.isWeekly;
+  // --- WIDGET BUDGET REGULER (FIXED) ---
+  Widget _buildBudgetCard(
+    Category category,
+    List<Transaction> transactions,
+    Wallet wallet,
+  ) {
+    final bool isWeekly = wallet.isMonthly && category.isWeekly;
     final now = DateTime.now();
     int limit = 0;
     int expense = 0;
 
-    if (isWeekly) {
+    if (!wallet.isMonthly) {
+      // --- MODE TABUNGAN (AKUMULASI) ---
+      limit = category.budget;
+      expense = transactions
+          .where((t) => t.categoryId == category.id && t.type == 'expense')
+          .fold(0, (sum, t) => sum + t.amount);
+    } else if (isWeekly) {
       // --- MODE MINGGUAN ---
       final daysInMonth = DateUtils.getDaysInMonth(now.year, now.month);
       double rawWeekly = (category.budget / daysInMonth) * 7;
@@ -227,7 +243,6 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
 
       final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
       final endOfWeek = startOfWeek.add(const Duration(days: 6));
-
       final start = DateTime(
         startOfWeek.year,
         startOfWeek.month,
@@ -250,7 +265,6 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
             } catch (_) {
               tDate = DateTime.parse(t.date.toString());
             }
-
             return t.categoryId == category.id &&
                 t.type == 'expense' &&
                 tDate.isAfter(start.subtract(const Duration(seconds: 1))) &&
@@ -268,7 +282,6 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
             } catch (_) {
               tDate = DateTime.parse(t.date.toString());
             }
-
             return t.categoryId == category.id &&
                 t.type == 'expense' &&
                 tDate.month == now.month &&
@@ -278,10 +291,9 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
     }
 
     final double percentage = limit == 0 ? 0 : expense / limit;
-    final int remaining = limit - expense; // <--- INI YANG TADI HILANG
+    final int remaining = limit - expense;
     final double progressValue = percentage > 1.0 ? 1.0 : percentage;
 
-    // --- LOGIKA STATUS WARNA & LABEL ---
     Color statusColor;
     String statusText;
 
@@ -305,7 +317,7 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
+      // Padding dipindah ke dalam InkWell di bawah agar efek klik full
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -323,6 +335,7 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: () {
+            // --- NAVIGASI KE HALAMAN DETAIL PER KATEGORI ---
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -331,10 +344,9 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
             );
           },
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(16), // Padding dipindah ke sini
             child: Column(
               children: [
-                // BARIS ATAS
                 Row(
                   children: [
                     Container(
@@ -363,60 +375,68 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () async {
-                              final updatedCategory = category.copyWith(
-                                isWeekly: !category.isWeekly,
-                              );
-                              await ref.read(updateCategoryProvider)(
-                                updatedCategory,
-                              );
-                              ref.invalidate(categoryListProvider);
-                            },
-                            borderRadius: BorderRadius.circular(12),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isWeekly
-                                    ? Colors.teal.shade50
-                                    : Colors.blue.shade50,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: isWeekly ? Colors.teal : Colors.blue,
-                                  width: 1,
+                        // TOMBOL TOGGLE (Hanya muncul jika Wallet Harian)
+                        if (wallet.isMonthly)
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () async {
+                                final updatedCategory = category.copyWith(
+                                  isWeekly: !category.isWeekly,
+                                );
+                                await ref.read(updateCategoryProvider)(
+                                  updatedCategory,
+                                );
+                                ref.invalidate(categoryListProvider);
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
                                 ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    isWeekly
-                                        ? Icons.calendar_view_week
-                                        : Icons.calendar_view_month,
-                                    size: 14,
-                                    color: isWeekly ? Colors.teal : Colors.blue,
+                                decoration: BoxDecoration(
+                                  color: category.isWeekly
+                                      ? Colors.teal.shade50
+                                      : Colors.blue.shade50,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: category.isWeekly
+                                        ? Colors.teal
+                                        : Colors.blue,
+                                    width: 1,
                                   ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    isWeekly ? 'Mingguan' : 'Bulanan',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      color: isWeekly
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      category.isWeekly
+                                          ? Icons.calendar_view_week
+                                          : Icons.calendar_view_month,
+                                      size: 14,
+                                      color: category.isWeekly
                                           ? Colors.teal
                                           : Colors.blue,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      category.isWeekly
+                                          ? 'Mingguan'
+                                          : 'Bulanan',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: category.isWeekly
+                                            ? Colors.teal
+                                            : Colors.blue,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
 
                         const SizedBox(height: 4),
 
@@ -445,7 +465,6 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
 
                 const SizedBox(height: 16),
 
-                // PROGRESS BAR
                 Stack(
                   alignment: Alignment.center,
                   children: [
@@ -471,7 +490,6 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
 
                 const SizedBox(height: 10),
 
-                // INFO BAWAH
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -483,7 +501,6 @@ class _BudgetDetailPageState extends ConsumerState<BudgetDetailPage> {
                         fontSize: 13,
                       ),
                     ),
-
                     Text(
                       remaining < 0
                           ? 'Over: ${_formatNumber(remaining.abs())}'

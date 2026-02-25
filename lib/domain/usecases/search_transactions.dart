@@ -8,7 +8,8 @@ class SearchTransactions {
 
   SearchTransactions(this.repository);
 
-  Future<Either<Failure, List<Transaction>>> call(String query) {
-    return repository.searchTransactions(query);
+  // Terima walletId
+  Future<Either<Failure, List<Transaction>>> call(String query, int walletId) {
+    return repository.searchTransactions(query, walletId);
   }
 }

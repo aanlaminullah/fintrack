@@ -121,15 +121,14 @@ class CategoryListPage extends ConsumerWidget {
         );
       },
       onDismissed: (direction) async {
-        // 1. Panggil UseCase Delete
-        final deleteUseCase = ref.read(deleteCategoryProvider);
-        await deleteUseCase(category.id!);
+        // FIX: Panggil method di Notifier (konsisten dengan add/update)
+        await ref
+            .read(categoryListProvider.notifier)
+            .deleteCategory(category.id!);
 
-        // 2. Refresh Provider Kategori & Transaksi (agar UI sinkron)
-        ref.invalidate(categoryListProvider);
+        // Refresh Provider Transaksi (opsional, tapi bagus jika ada transaksi terkait)
         ref.invalidate(transactionListProvider);
 
-        // 3. Feedback Snackbar
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('${category.name} dihapus')));

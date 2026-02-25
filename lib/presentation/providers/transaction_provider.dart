@@ -1,98 +1,138 @@
-import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../data/datasources/local/database_helper.dart';
 import '../../domain/entities/transaction.dart';
-import 'usecase_providers.dart';
+import '../../data/models/transaction_model.dart';
+import 'wallet_provider.dart';
+import 'usecase_providers.dart'; // Import usecase untuk dashboard summary (opsional jika dipakai di logic lain)
 
-// --- 1. Provider untuk Dashboard Summary ---
-final dashboardSummaryProvider =
-    AsyncNotifierProvider<DashboardSummaryNotifier, Map<String, int>>(() {
-      return DashboardSummaryNotifier();
-    });
-
-class DashboardSummaryNotifier extends AsyncNotifier<Map<String, int>> {
-  @override
-  Future<Map<String, int>> build() async {
-    // Ambil usecase
-    final getDashboardSummary = ref.watch(getDashboardSummaryProvider);
-
-    // Eksekusi logic
-    final result = await getDashboardSummary();
-
-    // Fold: Kiri (Error) -> Lempar error, Kanan (Sukses) -> Kembalikan data
-    return result.fold((failure) => throw failure.message, (data) => data);
-  }
-}
-
-// --- 2. Provider untuk List Transaksi (Sekaligus Controller Add/Delete) ---
+// --- 1. PROVIDER LIST TRANSAKSI UTAMA ---
 final transactionListProvider =
-    AsyncNotifierProvider<TransactionListNotifier, List<Transaction>>(() {
-      return TransactionListNotifier();
+    AsyncNotifierProvider<TransactionList, List<Transaction>>(() {
+      return TransactionList();
     });
 
-class TransactionListNotifier extends AsyncNotifier<List<Transaction>> {
+class TransactionList extends AsyncNotifier<List<Transaction>> {
   @override
   Future<List<Transaction>> build() async {
-    final getTransactions = ref.watch(getTransactionsProvider);
-    final result = await getTransactions();
+    // 1. Dengarkan perubahan pada Wallet yang dipilih
+    final currentWallet = ref.watch(selectedWalletProvider);
 
-    return result.fold((failure) => throw failure.message, (data) => data);
+    // 2. Jika belum ada wallet yang dipilih, kembalikan list kosong
+    if (currentWallet == null) return [];
+
+    // 3. Ambil transaksi milik wallet tersebut
+    return _fetchTransactions(currentWallet.id!);
   }
 
-  // Fungsi Tambah Transaksi
+  Future<List<Transaction>> _fetchTransactions(int walletId) async {
+    final db = await DatabaseHelper.instance.database;
+
+    // PERBAIKAN: Menggunakan rawQuery dengan LEFT JOIN agar Icon & Warna Kategori MUNCUL
+    final result = await db.rawQuery(
+      '''
+      SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id, t.note, t.wallet_id,
+             c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type
+      FROM transactions t
+      LEFT JOIN categories c ON t.category_id = c.id
+      WHERE t.wallet_id = ?
+      ORDER BY t.date DESC
+    ''',
+      [walletId],
+    );
+
+    return result.map((json) => TransactionModel.fromMap(json)).toList();
+  }
+
   Future<void> addTransaction(Transaction transaction) async {
-    // Set state jadi loading (opsional, agar UI disable tombol)
-    state = const AsyncValue.loading();
+    final currentWallet = ref.read(selectedWalletProvider);
+    if (currentWallet == null) return;
 
-    final addTransaction = ref.read(addTransactionProvider);
-    final result = await addTransaction(transaction);
+    final db = await DatabaseHelper.instance.database;
 
-    result.fold(
-      (failure) =>
-          state = AsyncValue.error(failure.message, StackTrace.current),
-      (success) {
-        ref.invalidateSelf(); // Ini akan otomatis memicu update pada Chart
-        ref.invalidate(
-          dashboardSummaryProvider,
-        ); // Ini tetap perlu karena ambil dari DB
-      },
+    final transactionModel = TransactionModel(
+      id: transaction.id,
+      title: transaction.title,
+      amount: transaction.amount,
+      type: transaction.type,
+      categoryId: transaction.categoryId,
+      date: transaction.date,
+      note: transaction.note,
     );
+
+    final Map<String, dynamic> data = transactionModel.toJson();
+    data['wallet_id'] = currentWallet.id; // Set pemilik wallet
+
+    await db.insert('transactions', data);
+
+    // Refresh state
+    state = AsyncValue.data(await _fetchTransactions(currentWallet.id!));
+
+    // Refresh summary dashboard juga
+    ref.invalidate(dashboardSummaryProvider);
   }
 
-  // TAMBAHAN: Fungsi Update
   Future<void> updateTransaction(Transaction transaction) async {
-    state = const AsyncValue.loading();
+    final currentWallet = ref.read(selectedWalletProvider);
+    if (currentWallet == null) return;
 
-    final updateUsecase = ref.read(updateTransactionProvider);
-    final result = await updateUsecase(transaction);
+    final db = await DatabaseHelper.instance.database;
 
-    result.fold(
-      (failure) =>
-          state = AsyncValue.error(failure.message, StackTrace.current),
-      (success) {
-        ref.invalidateSelf(); // Ini akan otomatis memicu update pada Chart
-        ref.invalidate(
-          dashboardSummaryProvider,
-        ); // Ini tetap perlu karena ambil dari DB
-      },
+    final transactionModel = TransactionModel(
+      id: transaction.id,
+      title: transaction.title,
+      amount: transaction.amount,
+      type: transaction.type,
+      categoryId: transaction.categoryId,
+      date: transaction.date,
+      note: transaction.note,
     );
+
+    final Map<String, dynamic> data = transactionModel.toJson();
+    data['wallet_id'] = currentWallet.id;
+
+    await db.update(
+      'transactions',
+      data,
+      where: 'id = ?',
+      whereArgs: [transaction.id],
+    );
+
+    state = AsyncValue.data(await _fetchTransactions(currentWallet.id!));
+    ref.invalidate(dashboardSummaryProvider);
   }
 
-  // TAMBAHAN: Fungsi Delete
   Future<void> deleteTransaction(int id) async {
-    // Kita tidak perlu set loading penuh agar UI tidak kedip (optimistic update optional)
-    // Tapi cara paling aman:
-    final deleteUsecase = ref.read(deleteTransactionProvider);
-    final result = await deleteUsecase(id);
+    final currentWallet = ref.read(selectedWalletProvider);
+    if (currentWallet == null) return;
 
-    result.fold(
-      (failure) =>
-          state = AsyncValue.error(failure.message, StackTrace.current),
-      (success) {
-        ref.invalidateSelf(); // Ini akan otomatis memicu update pada Chart
-        ref.invalidate(
-          dashboardSummaryProvider,
-        ); // Ini tetap perlu karena ambil dari DB
-      },
-    );
+    final db = await DatabaseHelper.instance.database;
+    await db.delete('transactions', where: 'id = ?', whereArgs: [id]);
+
+    state = AsyncValue.data(await _fetchTransactions(currentWallet.id!));
+    ref.invalidate(dashboardSummaryProvider);
   }
 }
+
+// --- 2. PROVIDER SUMMARY (Hitung Total Saldo/Pemasukan/Pengeluaran) ---
+final dashboardSummaryProvider =
+    Provider.autoDispose<AsyncValue<Map<String, int>>>((ref) {
+      final transactionsAsync = ref.watch(transactionListProvider);
+      final currentWallet = ref.watch(selectedWalletProvider);
+
+      return transactionsAsync.whenData((transactions) {
+        int income = 0;
+        int expense = 0;
+
+        // Hitung total dari list transaksi yang SUDAH difilter oleh provider di atas
+        for (var t in transactions) {
+          if (t.type == 'income') income += t.amount;
+          if (t.type == 'expense') expense += t.amount;
+        }
+
+        return {
+          'income': income,
+          'expense': expense,
+          'total': income - expense,
+        };
+      });
+    });

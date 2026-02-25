@@ -22,6 +22,9 @@ abstract class TransactionRepository {
   // Tambahkan ini: Mengambil total pengeluaran dikelompokkan per kategori
   Future<Either<Failure, Map<String, int>>> getExpenseByCategory();
 
-  // TAMBAHAN: Search
-  Future<Either<Failure, List<Transaction>>> searchTransactions(String query);
+  // TAMBAHAN: Search (Wajib filter by Wallet ID)
+  Future<Either<Failure, List<Transaction>>> searchTransactions(
+    String query,
+    int walletId,
+  );
 }

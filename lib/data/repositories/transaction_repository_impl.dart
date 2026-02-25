@@ -155,27 +155,39 @@ class TransactionRepositoryImpl implements TransactionRepository {
   @override
   Future<Either<Failure, List<Transaction>>> searchTransactions(
     String query,
+    int walletId,
   ) async {
     try {
       final db = await databaseHelper.database;
 
-      // Jika query kosong, ambil semua (sama seperti getTransactions)
+      String sql;
+      List<dynamic> args;
+
       if (query.trim().isEmpty) {
-        return getTransactions();
+        // Jika query kosong, ambil SEMUA transaksi milik WALLET INI saja
+        sql = '''
+          SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id, t.note, t.wallet_id,
+                 c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type
+          FROM transactions t
+          LEFT JOIN categories c ON t.category_id = c.id
+          WHERE t.wallet_id = ?
+          ORDER BY t.date DESC
+        ''';
+        args = [walletId];
+      } else {
+        // Jika ada query, filter WALLET INI + JUDUL mengandung query
+        sql = '''
+          SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id, t.note, t.wallet_id,
+                 c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type
+          FROM transactions t
+          LEFT JOIN categories c ON t.category_id = c.id
+          WHERE t.wallet_id = ? AND t.title LIKE ? 
+          ORDER BY t.date DESC
+        ''';
+        args = [walletId, '%$query%'];
       }
 
-      // Query Search menggunakan LIKE
-      final result = await db.rawQuery(
-        '''
-        SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id,
-               c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type
-        FROM transactions t
-        LEFT JOIN categories c ON t.category_id = c.id
-        WHERE t.title LIKE ? 
-        ORDER BY t.date DESC
-      ''',
-        ['%$query%'],
-      ); // Tanda % artinya "mengandung kata ini"
+      final result = await db.rawQuery(sql, args);
 
       final List<Transaction> transactions = result.map((e) {
         return TransactionModel.fromMap(e).toEntity();

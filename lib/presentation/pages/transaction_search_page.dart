@@ -6,7 +6,8 @@ import '../providers/transaction_provider.dart';
 import '../../domain/entities/transaction.dart';
 import '../widgets/transaction_item.dart';
 import 'add_transaction_page.dart';
-import '../../core/utils/currency_formatter.dart'; // <--- 1. TAMBAHAN IMPORT
+import '../../core/utils/currency_formatter.dart';
+import '../providers/wallet_provider.dart';
 
 // 1. Notifier untuk Search Query
 class SearchQueryNotifier extends Notifier<String> {
@@ -38,9 +39,17 @@ final filteredTransactionsProvider =
       final selectedMonth = ref.watch(selectedMonthProvider);
       final searchUseCase = ref.watch(searchTransactionsProvider);
 
-      ref.watch(transactionListProvider); // Auto-refresh
+      // AMBIL WALLET YANG AKTIF
+      final currentWallet = ref.watch(selectedWalletProvider);
 
-      final result = await searchUseCase(query);
+      // Jika tidak ada wallet aktif, return kosong (safety)
+      if (currentWallet == null || currentWallet.id == null) return [];
+
+      // Auto-refresh jika ada perubahan di list utama
+      ref.watch(transactionListProvider);
+
+      // PANGGIL USECASE DENGAN WALLET ID
+      final result = await searchUseCase(query, currentWallet.id!);
 
       return result.fold((failure) => <Transaction>[], (data) {
         if (selectedMonth == null) return data;
@@ -56,9 +65,12 @@ final availableMonthsProvider = FutureProvider.autoDispose<List<DateTime>>((
   ref,
 ) async {
   final useCase = ref.watch(searchTransactionsProvider);
-  ref.watch(transactionListProvider);
+  final currentWallet = ref.watch(selectedWalletProvider);
 
-  final result = await useCase('');
+  if (currentWallet == null || currentWallet.id == null) return [];
+
+  // Panggil useCase dengan query kosong & wallet ID untuk dapat semua data wallet ini
+  final result = await useCase('', currentWallet.id!);
 
   return result.fold((failure) => [], (data) {
     final Set<String> uniqueKeys = {};
@@ -86,7 +98,6 @@ class TransactionSearchPage extends ConsumerStatefulWidget {
 class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
   bool _isFirstLoad = true;
 
-  // Helper untuk mengecek apakah dua tanggal sama persis
   bool _isSameDay(DateTime date1, DateTime date2) {
     return date1.year == date2.year &&
         date1.month == date2.month &&
@@ -211,7 +222,7 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
             ),
           ),
 
-          // --- LIST TRANSAKSI DENGAN SEPARATOR ---
+          // --- LIST TRANSAKSI ---
           Expanded(
             child: transactionsAsync.when(
               data: (transactions) {
@@ -221,14 +232,16 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
-                          Icons.receipt_long,
+                          Icons.search_off, // Icon diganti biar beda
                           size: 64,
                           color: Colors.grey[300],
                         ),
                         const SizedBox(height: 16),
-                        const Text(
-                          'Tidak ada transaksi',
-                          style: TextStyle(color: Colors.grey),
+                        Text(
+                          currentQuery.isEmpty
+                              ? 'Tidak ada transaksi di akun ini'
+                              : 'Tidak ditemukan "$currentQuery"',
+                          style: TextStyle(color: Colors.grey[400]),
                         ),
                       ],
                     ),
@@ -241,7 +254,6 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                   itemBuilder: (context, index) {
                     final transaction = transactions[index];
 
-                    // --- LOGIC PEMBATAS TANGGAL ---
                     bool showHeader = false;
                     if (index == 0) {
                       showHeader = true;
@@ -251,16 +263,13 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                         showHeader = true;
                       }
                     }
-                    // -----------------------------
 
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // TAMPILKAN HEADER TANGGAL & TOTAL
                         if (showHeader)
                           Builder(
                             builder: (context) {
-                              // --- 2. HITUNG TOTAL PENGELUARAN HARI INI ---
                               int totalDailyExpense = transactions
                                   .where(
                                     (t) =>
@@ -279,12 +288,10 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    // --- 3. UBAH TEXT JADI ROW (Tanggal & Total) ---
                                     Row(
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceBetween,
                                       children: [
-                                        // TANGGAL (Kiri)
                                         Text(
                                           DateFormat(
                                             'dd MMMM yyyy',
@@ -296,8 +303,6 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                                             color: Colors.black87,
                                           ),
                                         ),
-
-                                        // TOTAL (Kanan) - Hanya tampil jika ada pengeluaran
                                         if (totalDailyExpense > 0)
                                           Text(
                                             formatRupiah(totalDailyExpense),
@@ -317,7 +322,6 @@ class _TransactionSearchPageState extends ConsumerState<TransactionSearchPage> {
                             },
                           ),
 
-                        // ITEM TRANSAKSI (SWIPEABLE)
                         Dismissible(
                           key: Key('search_${transaction.id}'),
                           direction: DismissDirection.endToStart,

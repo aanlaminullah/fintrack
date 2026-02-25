@@ -370,7 +370,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                         color: Colors.grey[300],
                         borderRadius: BorderRadius.circular(10),
                       ),
-                    ),
+                    ), // Cont
                     const Padding(
                       padding: EdgeInsets.all(16.0),
                       child: Text(
