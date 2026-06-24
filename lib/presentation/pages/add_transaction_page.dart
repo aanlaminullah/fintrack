@@ -9,6 +9,7 @@ import '../../domain/entities/transaction.dart' as entity;
 import '../providers/category_provider.dart';
 import '../providers/transaction_provider.dart';
 import '../providers/wallet_provider.dart'; // PERBAIKAN: Import ditambahkan
+import '../providers/flex_budget_provider.dart';
 import '../../core/utils/app_icons.dart';
 
 class AddTransactionPage extends ConsumerStatefulWidget {
@@ -309,6 +310,22 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
     ).format(amount);
   }
 
+  String _compactNumber(int value) {
+    final abs = value.abs();
+    final sign = value < 0 ? '-' : '';
+    if (abs >= 1000000) {
+      final double val = abs / 1000000;
+      final formatted = val.toStringAsFixed(val.truncateToDouble() == val ? 0 : 1);
+      return '$sign${formatted}jt';
+    } else if (abs >= 1000) {
+      final double val = abs / 1000;
+      final formatted = val.toStringAsFixed(val.truncateToDouble() == val ? 0 : 1);
+      return '$sign${formatted}k';
+    } else {
+      return '$sign$abs';
+    }
+  }
+
   void _showCategoryPicker() {
     setState(() => _isAmountFocused = false);
     FocusManager.instance.primaryFocus?.unfocus();
@@ -329,6 +346,32 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
             return Consumer(
               builder: (context, ref, child) {
                 final categoryListState = ref.watch(categoryListProvider);
+                final transactionsAsync = ref.watch(transactionListProvider);
+                final flexBudget = ref.watch(flexBudgetCalculationProvider);
+                final currentWallet = ref.watch(selectedWalletProvider);
+                final isMonthly = currentWallet?.isMonthly ?? true;
+                final now = DateTime.now();
+
+                // Hitung pengeluaran per kategori untuk bulan ini
+                final Map<int, int> categorySpentMap = {};
+                transactionsAsync.whenData((transactions) {
+                  for (final t in transactions) {
+                    if (t.type != 'expense') continue;
+                    final isMonthMatch = isMonthly
+                        ? (t.date.month == now.month && t.date.year == now.year)
+                        : true;
+                    if (!isMonthMatch) continue;
+                    categorySpentMap[t.categoryId] =
+                        (categorySpentMap[t.categoryId] ?? 0) + t.amount;
+                  }
+                });
+
+                final formatter = NumberFormat.currency(
+                  locale: 'id_ID',
+                  symbol: 'Rp ',
+                  decimalDigits: 0,
+                );
+
                 return Column(
                   children: [
                     const SizedBox(height: 10),
@@ -340,14 +383,43 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    const Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: Text(
-                        'Pilih Kategori',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Pilih Kategori',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          // Tampilkan sisa flex budget hanya untuk pengeluaran
+                          if (_type == 'expense')
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                const Text(
+                                  'Sisa Flex Budget',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                                Text(
+                                  formatter.format(flexBudget.remaining),
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: flexBudget.remaining >= 0
+                                        ? Colors.teal
+                                        : Colors.red,
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
                       ),
                     ),
                     Expanded(
@@ -364,13 +436,27 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                                   crossAxisCount: 4,
                                   crossAxisSpacing: 10,
                                   mainAxisSpacing: 16,
-                                  childAspectRatio: 0.8,
+                                  childAspectRatio: 0.72,
                                 ),
                             itemCount: filtered.length,
                             itemBuilder: (context, index) {
                               final cat = filtered[index];
                               final isSelected =
                                   _selectedCategory?.id == cat.id;
+
+                              // Hitung sisa budget kategori ini (hanya jika ada budget)
+                              String? remainingLabel;
+                              Color? remainingColor;
+                              if (_type == 'expense' && cat.budget > 0) {
+                                final spent =
+                                    categorySpentMap[cat.id] ?? 0;
+                                final remaining = cat.budget - spent;
+                                remainingColor = remaining >= 0
+                                    ? Colors.green[700]
+                                    : Colors.red[700];
+                                remainingLabel = _compactNumber(remaining);
+                              }
+
                               return GestureDetector(
                                 onTap: () {
                                   setState(() {
@@ -400,7 +486,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                                         color: Color(cat.color),
                                       ),
                                     ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: 6),
                                     Text(
                                       cat.name,
                                       textAlign: TextAlign.center,
@@ -413,6 +499,31 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                     ),
+                                    if (remainingLabel != null) ...
+                                      [
+                                        const SizedBox(height: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: remainingColor?.withOpacity(0.12),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Text(
+                                            remainingLabel,
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.bold,
+                                              color: remainingColor,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
                                   ],
                                 ),
                               );
