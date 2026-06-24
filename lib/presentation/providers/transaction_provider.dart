@@ -3,7 +3,6 @@ import '../../data/datasources/local/database_helper.dart';
 import '../../domain/entities/transaction.dart';
 import '../../data/models/transaction_model.dart';
 import 'wallet_provider.dart';
-import 'usecase_providers.dart'; // Import usecase untuk dashboard summary (opsional jika dipakai di logic lain)
 
 // --- 1. PROVIDER LIST TRANSAKSI UTAMA ---
 final transactionListProvider =
@@ -66,9 +65,6 @@ class TransactionList extends AsyncNotifier<List<Transaction>> {
 
     // Refresh state
     state = AsyncValue.data(await _fetchTransactions(currentWallet.id!));
-
-    // Refresh summary dashboard juga
-    ref.invalidate(dashboardSummaryProvider);
   }
 
   Future<void> updateTransaction(Transaction transaction) async {
@@ -98,7 +94,6 @@ class TransactionList extends AsyncNotifier<List<Transaction>> {
     );
 
     state = AsyncValue.data(await _fetchTransactions(currentWallet.id!));
-    ref.invalidate(dashboardSummaryProvider);
   }
 
   Future<void> deleteTransaction(int id) async {
@@ -109,7 +104,6 @@ class TransactionList extends AsyncNotifier<List<Transaction>> {
     await db.delete('transactions', where: 'id = ?', whereArgs: [id]);
 
     state = AsyncValue.data(await _fetchTransactions(currentWallet.id!));
-    ref.invalidate(dashboardSummaryProvider);
   }
 }
 

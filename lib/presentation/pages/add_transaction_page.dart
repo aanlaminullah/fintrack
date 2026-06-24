@@ -32,6 +32,9 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
   String _type = 'expense';
   DateTime _selectedDate = DateTime.now();
   Category? _selectedCategory;
+  Category? _overflowCategory;
+  int? _splitMainAmount;
+  int? _splitOverflowAmount;
   bool _isCategoryInitialized = false;
   bool _isAmountFocused = false;
 
@@ -127,6 +130,14 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Nominal harus lebih dari 0')),
         );
+        return;
+      }
+
+      // Jika ada split overflow aktif, simpan 2 transaksi
+      if (_overflowCategory != null &&
+          _splitMainAmount != null &&
+          _splitOverflowAmount != null) {
+        await _saveSplitTransactions(title, _splitMainAmount!, _splitOverflowAmount!);
         return;
       }
 
@@ -302,6 +313,159 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
     }
   }
 
+  Future<void> _saveSplitTransactions(
+    String title,
+    int mainAmount,
+    int overflowAmount,
+  ) async {
+    try {
+      final t1 = entity.Transaction(
+        title: title,
+        amount: mainAmount,
+        type: 'expense',
+        categoryId: _selectedCategory!.id!,
+        date: _selectedDate,
+      );
+      await ref.read(transactionListProvider.notifier).addTransaction(t1);
+
+      final t2 = entity.Transaction(
+        title: title,
+        amount: overflowAmount,
+        type: 'expense',
+        categoryId: _overflowCategory!.id!,
+        date: _selectedDate,
+      );
+      await ref.read(transactionListProvider.notifier).addTransaction(t2);
+
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<Category?> _showOverflowCategoryDialog({
+    required BuildContext pageContext,
+    required int overflowAmount,
+    required Category mainCategory,
+    required List<Category> allExpenseCategories,
+    required Map<int, int> categorySpentMap,
+    required int flexBudgetRemaining,
+  }) {
+    return showDialog<Category>(
+      context: pageContext,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Pilih Tambahan Budget',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Budget ${mainCategory.name} tidak cukup.\nAlokasikan ${_formatRupiah(overflowAmount)} ke kategori:',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[700],
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+          contentPadding: const EdgeInsets.symmetric(vertical: 8),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: allExpenseCategories.length,
+              itemBuilder: (_, index) {
+                final cat = allExpenseCategories[index];
+                if (cat.id == mainCategory.id) return const SizedBox.shrink();
+                final spent = categorySpentMap[cat.id] ?? 0;
+                final remaining = cat.budget > 0 ? cat.budget - spent : null;
+                return ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Color(cat.color).withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      AppIcons.getIcon(cat.icon),
+                      color: Color(cat.color),
+                      size: 20,
+                    ),
+                  ),
+                  title: Text(cat.name),
+                  trailing: remaining != null
+                      ? Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: (remaining >= 0
+                                    ? Colors.green
+                                    : Colors.red)
+                                .withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            _compactNumber(remaining),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: remaining >= 0
+                                  ? Colors.green[700]
+                                  : Colors.red[700],
+                            ),
+                          ),
+                        )
+                      : Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: (flexBudgetRemaining >= 0
+                                    ? Colors.teal
+                                    : Colors.orange)
+                                .withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'Flex ${_compactNumber(flexBudgetRemaining)}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: flexBudgetRemaining >= 0
+                                  ? Colors.teal
+                                  : Colors.orange[700],
+                            ),
+                          ),
+                        ),
+                  onTap: () => Navigator.pop(ctx, cat),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Batal'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   String _formatRupiah(int amount) {
     return NumberFormat.currency(
       locale: 'id_ID',
@@ -329,9 +493,10 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
   void _showCategoryPicker() {
     setState(() => _isAmountFocused = false);
     FocusManager.instance.primaryFocus?.unfocus();
+    final pageContext = context;
 
     showModalBottomSheet(
-      context: context,
+      context: pageContext,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -458,9 +623,49 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                               }
 
                               return GestureDetector(
-                                onTap: () {
+                                onTap: () async {
+                                  // Cek apakah perlu split overflow
+                                  final amountStr = _amountController.text
+                                      .replaceAll('.', '');
+                                  final amount = int.tryParse(amountStr) ?? 0;
+                                  if (amount > 0 &&
+                                      cat.budget > 0 &&
+                                      _type == 'expense') {
+                                    final spent =
+                                        categorySpentMap[cat.id] ?? 0;
+                                    final remaining = cat.budget - spent;
+                                    if (remaining > 0 && amount > remaining) {
+                                      final overflow = amount - remaining;
+                                      final overflowCat =
+                                          await _showOverflowCategoryDialog(
+                                        pageContext: pageContext,
+                                        overflowAmount: overflow,
+                                        mainCategory: cat,
+                                        allExpenseCategories: filtered,
+                                        categorySpentMap: categorySpentMap,
+                                        flexBudgetRemaining: flexBudget.remaining,
+                                      );
+                                      if (overflowCat != null) {
+                                        setState(() {
+                                          _selectedCategory = cat;
+                                          _overflowCategory = overflowCat;
+                                          _splitMainAmount = remaining;
+                                          _splitOverflowAmount = overflow;
+                                          _isCategoryInitialized = true;
+                                        });
+                                        if (context.mounted) {
+                                          Navigator.pop(context);
+                                        }
+                                      }
+                                      return;
+                                    }
+                                  }
+                                  // Seleksi normal (tanpa split)
                                   setState(() {
                                     _selectedCategory = cat;
+                                    _overflowCategory = null;
+                                    _splitMainAmount = null;
+                                    _splitOverflowAmount = null;
                                     _isCategoryInitialized = true;
                                   });
                                   Navigator.pop(context);
@@ -619,6 +824,9 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                           setState(() {
                             _type = newSelection.first;
                             _selectedCategory = null;
+                            _overflowCategory = null;
+                            _splitMainAmount = null;
+                            _splitOverflowAmount = null;
                             _isCategoryInitialized = false;
                           });
                         },
@@ -714,21 +922,62 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                             const Icon(Icons.category, color: Colors.grey),
                             const SizedBox(width: 12),
                             Expanded(
-                              child: Text(
-                                _selectedCategory?.name ?? 'Pilih Kategori',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: _selectedCategory == null
-                                      ? Colors.grey[700]
-                                      : Colors.black,
-                                ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _overflowCategory != null
+                                        ? '${_selectedCategory!.name}  +  ${_overflowCategory!.name}'
+                                        : (_selectedCategory?.name ??
+                                            'Pilih Kategori'),
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: _selectedCategory == null
+                                          ? Colors.grey[700]
+                                          : Colors.black,
+                                    ),
+                                  ),
+                                  if (_overflowCategory != null &&
+                                      _splitMainAmount != null &&
+                                      _splitOverflowAmount != null) ...[  
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${_formatRupiah(_splitMainAmount!)}  &  ${_formatRupiah(_splitOverflowAmount!)}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
-                            if (_selectedCategory != null)
-                              Icon(
-                                AppIcons.getIcon(_selectedCategory!.icon),
-                                color: Color(_selectedCategory!.color),
-                              ),
+                            if (_selectedCategory != null) ...[  
+                              if (_overflowCategory != null) ...[  
+                                Icon(
+                                  AppIcons.getIcon(_selectedCategory!.icon),
+                                  color: Color(_selectedCategory!.color),
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 2),
+                                const Icon(
+                                  Icons.add,
+                                  size: 14,
+                                  color: Colors.grey,
+                                ),
+                                const SizedBox(width: 2),
+                                Icon(
+                                  AppIcons.getIcon(_overflowCategory!.icon),
+                                  color: Color(_overflowCategory!.color),
+                                  size: 20,
+                                ),
+                              ] else
+                                Icon(
+                                  AppIcons.getIcon(_selectedCategory!.icon),
+                                  color: Color(_selectedCategory!.color),
+                                ),
+                            ],
                             const Icon(Icons.arrow_drop_down),
                           ],
                         ),
