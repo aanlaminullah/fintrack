@@ -6,8 +6,8 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
-  // VERSI DB 4 (Multi-Wallet)
-  static const int _dbVersion = 4;
+  // VERSI DB 5 (Wallet Active/Inactive)
+  static const int _dbVersion = 5;
 
   DatabaseHelper._init();
 
@@ -83,6 +83,14 @@ class DatabaseHelper {
         'UPDATE transactions SET wallet_id = $defaultWalletId WHERE wallet_id IS NULL',
       );
     }
+    // Migrasi Versi 5 (Wallet Active/Inactive)
+    if (oldVersion < 5) {
+      try {
+        await db.execute(
+          'ALTER TABLE wallets ADD COLUMN is_active INTEGER DEFAULT 1',
+        );
+      } catch (_) {}
+    }
   }
 
   Future _createDB(Database db, int version) async {
@@ -96,7 +104,8 @@ class DatabaseHelper {
       CREATE TABLE wallets (
         id $idType,
         name $textType,
-        is_monthly INTEGER DEFAULT 1
+        is_monthly INTEGER DEFAULT 1,
+        is_active INTEGER DEFAULT 1
       )
     ''');
 
@@ -137,6 +146,7 @@ class DatabaseHelper {
     int walletId = await db.insert('wallets', {
       'name': 'Dompet Harian',
       'is_monthly': 1,
+      'is_active': 1,
     });
 
     // 2. Seed Categories

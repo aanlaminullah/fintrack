@@ -22,13 +22,18 @@ class WalletListNotifier extends AsyncNotifier<List<Wallet>> {
     return result.map((json) => Wallet.fromMap(json)).toList();
   }
 
-  Future<void> addWallet(String name, bool isMonthly) async {
+  Future<void> addWallet(
+    String name,
+    bool isMonthly, {
+    bool isActive = true,
+  }) async {
     final db = await DatabaseHelper.instance.database;
 
     // 1. Buat Wallet Baru
     int newWalletId = await db.insert('wallets', {
       'name': name,
       'is_monthly': isMonthly ? 1 : 0,
+      'is_active': isActive ? 1 : 0,
     });
 
     // 2. Siapkan Kategori Default untuk Wallet ini
@@ -117,11 +122,20 @@ class WalletListNotifier extends AsyncNotifier<List<Wallet>> {
 
     // Update state selected wallet jika yang diedit adalah yang sedang aktif
     final currentSelected = ref.read(selectedWalletProvider);
+    final updatedWallets = await _fetchWallets();
     if (currentSelected?.id == wallet.id) {
-      ref.read(selectedWalletProvider.notifier).selectWallet(wallet);
+      if (!wallet.isActive) {
+        // Jika diset tidak aktif, pindah ke wallet aktif pertama
+        final activeWallets = updatedWallets.where((w) => w.isActive).toList();
+        ref.read(selectedWalletProvider.notifier).selectWallet(
+          activeWallets.isNotEmpty ? activeWallets.first : wallet,
+        );
+      } else {
+        ref.read(selectedWalletProvider.notifier).selectWallet(wallet);
+      }
     }
 
-    state = AsyncValue.data(await _fetchWallets());
+    state = AsyncValue.data(updatedWallets);
   }
 
   Future<void> deleteWallet(int id) async {
@@ -135,9 +149,10 @@ class WalletListNotifier extends AsyncNotifier<List<Wallet>> {
     // Jika wallet yang dihapus adalah wallet yang sedang aktif, pindah ke wallet pertama
     final currentSelected = ref.read(selectedWalletProvider);
     if (currentSelected?.id == id && updatedWallets.isNotEmpty) {
+      final activeWallets = updatedWallets.where((w) => w.isActive).toList();
       ref
           .read(selectedWalletProvider.notifier)
-          .selectWallet(updatedWallets.first);
+          .selectWallet(activeWallets.isNotEmpty ? activeWallets.first : updatedWallets.first);
       ref.invalidate(transactionListProvider);
       ref.invalidate(dashboardSummaryProvider);
       ref.invalidate(categoryListProvider);
@@ -154,9 +169,15 @@ class SelectedWalletNotifier extends Notifier<Wallet?> {
 
   Future<void> loadInitial() async {
     final db = await DatabaseHelper.instance.database;
-    final result = await db.query('wallets');
+    final result = await db.query('wallets', where: 'is_active = 1');
     if (result.isNotEmpty) {
       state = Wallet.fromMap(result.first);
+    } else {
+      // Fallback if no active wallet is found
+      final allResult = await db.query('wallets');
+      if (allResult.isNotEmpty) {
+        state = Wallet.fromMap(allResult.first);
+      }
     }
   }
 

@@ -231,7 +231,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   }
                 },
                 items: [
-                  ...wallets.map<DropdownMenuItem<Wallet>>((Wallet wallet) {
+                  ...wallets
+                      .where((w) => w.isActive)
+                      .map<DropdownMenuItem<Wallet>>((Wallet wallet) {
                     return DropdownMenuItem<Wallet>(
                       value: wallet,
                       child: Row(

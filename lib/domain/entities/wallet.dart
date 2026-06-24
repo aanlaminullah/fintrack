@@ -4,16 +4,23 @@ class Wallet extends Equatable {
   final int? id;
   final String name;
   final bool
-  isMonthly; // true = Reset tiap bulan, false = Akumulasi (Project/Tabungan)
+      isMonthly; // true = Reset tiap bulan, false = Akumulasi (Project/Tabungan)
+  final bool isActive; // true = Active, false = Inactive
 
   const Wallet({
     this.id,
     required this.name,
     this.isMonthly = true, // Default Bulanan
+    this.isActive = true, // Default Active
   });
 
   Map<String, dynamic> toMap() {
-    return {'id': id, 'name': name, 'is_monthly': isMonthly ? 1 : 0};
+    return {
+      'id': id,
+      'name': name,
+      'is_monthly': isMonthly ? 1 : 0,
+      'is_active': isActive ? 1 : 0,
+    };
   }
 
   factory Wallet.fromMap(Map<String, dynamic> map) {
@@ -21,9 +28,10 @@ class Wallet extends Equatable {
       id: map['id'],
       name: map['name'],
       isMonthly: (map['is_monthly'] ?? 1) == 1,
+      isActive: (map['is_active'] ?? 1) == 1,
     );
   }
 
   @override
-  List<Object?> get props => [id, name, isMonthly];
+  List<Object?> get props => [id, name, isMonthly, isActive];
 }

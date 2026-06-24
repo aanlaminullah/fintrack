@@ -93,10 +93,20 @@ class WalletListPage extends ConsumerWidget {
                       wallet.name,
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    subtitle: Text(
-                      wallet.isMonthly
-                          ? 'Mode Bulanan (Reset)'
-                          : 'Mode Tabungan (Akumulasi)',
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          wallet.isMonthly
+                              ? 'Mode Bulanan (Reset)'
+                              : 'Mode Tabungan (Akumulasi)',
+                        ),
+                        if (!wallet.isActive)
+                          const Text(
+                            'Status: Tidak Aktif',
+                            style: TextStyle(color: Colors.red, fontSize: 12),
+                          ),
+                      ],
                     ),
                     trailing: const Icon(
                       Icons.edit,

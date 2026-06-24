@@ -16,6 +16,7 @@ class _WalletFormPageState extends ConsumerState<WalletFormPage> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   bool _isMonthly = true;
+  bool _isActive = true;
 
   bool get _isEditMode => widget.walletToEdit != null;
 
@@ -25,6 +26,7 @@ class _WalletFormPageState extends ConsumerState<WalletFormPage> {
     if (_isEditMode) {
       _nameController.text = widget.walletToEdit!.name;
       _isMonthly = widget.walletToEdit!.isMonthly;
+      _isActive = widget.walletToEdit!.isActive;
     }
   }
 
@@ -42,6 +44,7 @@ class _WalletFormPageState extends ConsumerState<WalletFormPage> {
             id: widget.walletToEdit!.id,
             name: _nameController.text,
             isMonthly: _isMonthly,
+            isActive: _isActive,
           );
           await ref
               .read(walletListProvider.notifier)
@@ -54,7 +57,11 @@ class _WalletFormPageState extends ConsumerState<WalletFormPage> {
         } else {
           await ref
               .read(walletListProvider.notifier)
-              .addWallet(_nameController.text, _isMonthly);
+              .addWallet(
+                _nameController.text,
+                _isMonthly,
+                isActive: _isActive,
+              );
           if (mounted) {
             ScaffoldMessenger.of(
               context,
@@ -123,6 +130,30 @@ class _WalletFormPageState extends ConsumerState<WalletFormPage> {
                   value: _isMonthly,
                   activeColor: Colors.teal,
                   onChanged: (val) => setState(() => _isMonthly = val),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: SwitchListTile(
+                  title: const Text(
+                    'Status Aktif',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    _isActive
+                        ? 'Akun ini akan ditampilkan di dashboard.'
+                        : 'Akun ini disembunyikan dari dashboard.',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  value: _isActive,
+                  activeColor: Colors.teal,
+                  onChanged: (val) => setState(() => _isActive = val),
                 ),
               ),
 
