@@ -3,6 +3,7 @@ import '../../data/datasources/local/database_helper.dart';
 import '../../domain/entities/transaction.dart';
 import '../../data/models/transaction_model.dart';
 import 'wallet_provider.dart';
+import 'funding_source_provider.dart';
 
 // --- 1. PROVIDER LIST TRANSAKSI UTAMA ---
 final transactionListProvider =
@@ -29,7 +30,7 @@ class TransactionList extends AsyncNotifier<List<Transaction>> {
     // PERBAIKAN: Menggunakan rawQuery dengan LEFT JOIN agar Icon & Warna Kategori MUNCUL
     final result = await db.rawQuery(
       '''
-      SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id, t.note, t.wallet_id,
+      SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id, t.note, t.wallet_id, t.funding_source_id,
              c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type
       FROM transactions t
       LEFT JOIN categories c ON t.category_id = c.id
@@ -56,6 +57,7 @@ class TransactionList extends AsyncNotifier<List<Transaction>> {
       categoryId: transaction.categoryId,
       date: transaction.date,
       note: transaction.note,
+      fundingSourceId: transaction.fundingSourceId,
     );
 
     final Map<String, dynamic> data = transactionModel.toJson();
@@ -65,6 +67,7 @@ class TransactionList extends AsyncNotifier<List<Transaction>> {
 
     // Refresh state
     state = AsyncValue.data(await _fetchTransactions(currentWallet.id!));
+    ref.invalidate(fundingSourceBalancesProvider);
   }
 
   Future<void> updateTransaction(Transaction transaction) async {
@@ -81,6 +84,7 @@ class TransactionList extends AsyncNotifier<List<Transaction>> {
       categoryId: transaction.categoryId,
       date: transaction.date,
       note: transaction.note,
+      fundingSourceId: transaction.fundingSourceId,
     );
 
     final Map<String, dynamic> data = transactionModel.toJson();
@@ -94,6 +98,7 @@ class TransactionList extends AsyncNotifier<List<Transaction>> {
     );
 
     state = AsyncValue.data(await _fetchTransactions(currentWallet.id!));
+    ref.invalidate(fundingSourceBalancesProvider);
   }
 
   Future<void> deleteTransaction(int id) async {
@@ -104,6 +109,7 @@ class TransactionList extends AsyncNotifier<List<Transaction>> {
     await db.delete('transactions', where: 'id = ?', whereArgs: [id]);
 
     state = AsyncValue.data(await _fetchTransactions(currentWallet.id!));
+    ref.invalidate(fundingSourceBalancesProvider);
   }
 }
 

@@ -10,6 +10,7 @@ class TransactionModel extends Transaction {
     required super.categoryId,
     required super.date,
     super.note,
+    required super.fundingSourceId,
     super.category,
   });
 
@@ -25,6 +26,7 @@ class TransactionModel extends Transaction {
       // Konversi String ISO8601 ke DateTime
       date: DateTime.parse(map['date']),
       note: map['note'],
+      fundingSourceId: map['funding_source_id'],
 
       // --- LOGIC JOIN (PENTING UNTUK SEARCH) ---
       // Cek apakah map memiliki data kategori (hasil dari query JOIN)
@@ -56,6 +58,7 @@ class TransactionModel extends Transaction {
       categoryId: categoryId,
       date: date,
       note: note,
+      fundingSourceId: fundingSourceId,
       category: category, // Bawa serta object kategori jika ada
     );
   }
@@ -71,6 +74,7 @@ class TransactionModel extends Transaction {
       'category_id': categoryId,
       'date': date.toIso8601String(),
       'note': note,
+      'funding_source_id': fundingSourceId,
     };
   }
 }

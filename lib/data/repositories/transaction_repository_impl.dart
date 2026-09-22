@@ -15,7 +15,7 @@ class TransactionRepositoryImpl implements TransactionRepository {
     try {
       final db = await databaseHelper.database;
       final result = await db.rawQuery('''
-        SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id,
+        SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id, t.note, t.wallet_id, t.funding_source_id,
                c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type
         FROM transactions t
         LEFT JOIN categories c ON t.category_id = c.id
@@ -43,6 +43,7 @@ class TransactionRepositoryImpl implements TransactionRepository {
         categoryId: transaction.categoryId,
         date: transaction.date,
         note: transaction.note,
+        fundingSourceId: transaction.fundingSourceId,
       );
 
       final id = await db.insert('transactions', transactionModel.toJson());
@@ -66,6 +67,7 @@ class TransactionRepositoryImpl implements TransactionRepository {
         categoryId: transaction.categoryId,
         date: transaction.date,
         note: transaction.note,
+        fundingSourceId: transaction.fundingSourceId,
       );
 
       final rows = await db.update(
@@ -166,7 +168,7 @@ class TransactionRepositoryImpl implements TransactionRepository {
       if (query.trim().isEmpty) {
         // Jika query kosong, ambil SEMUA transaksi milik WALLET INI saja
         sql = '''
-          SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id, t.note, t.wallet_id,
+          SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id, t.note, t.wallet_id, t.funding_source_id,
                  c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type
           FROM transactions t
           LEFT JOIN categories c ON t.category_id = c.id
@@ -177,7 +179,7 @@ class TransactionRepositoryImpl implements TransactionRepository {
       } else {
         // Jika ada query, filter WALLET INI + JUDUL mengandung query
         sql = '''
-          SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id, t.note, t.wallet_id,
+          SELECT t.id, t.title, t.amount, t.date, t.type, t.category_id, t.note, t.wallet_id, t.funding_source_id,
                  c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type
           FROM transactions t
           LEFT JOIN categories c ON t.category_id = c.id

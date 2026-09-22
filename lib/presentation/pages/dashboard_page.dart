@@ -6,9 +6,12 @@ import '../providers/transaction_provider.dart';
 import '../providers/chart_provider.dart';
 import '../providers/category_provider.dart';
 import '../providers/wallet_provider.dart'; // Import Wallet Provider
+import '../providers/funding_source_provider.dart';
+import '../providers/funding_source_transfer_provider.dart';
 
 // Import Widgets & Pages
 import '../widgets/summary_card.dart';
+import '../widgets/funding_sources_card.dart';
 import '../widgets/transaction_item.dart';
 import '../widgets/expense_pie_chart.dart';
 import '../widgets/budget_summary_widget.dart';
@@ -28,6 +31,8 @@ import '../../core/services/report_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:typed_data';
 import 'wallet_list_page.dart'; // Tambahkan ini di deretan import
+import 'funding_source_list_page.dart';
+import 'funding_source_transfer_page.dart';
 
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
@@ -38,8 +43,8 @@ class DashboardPage extends ConsumerStatefulWidget {
 
 class _DashboardPageState extends ConsumerState<DashboardPage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  final PageController _pageController = PageController();
-  int _currentPage = 0;
+  final PageController _pageController = PageController(initialPage: 1);
+  int _currentPage = 1;
 
   @override
   void initState() {
@@ -149,6 +154,36 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                         );
                       },
                     ),
+                    _buildModernMenuItem(
+                      context,
+                      title: 'Kelola Sumber Dana',
+                      icon: Icons.savings_outlined,
+                      color: Colors.purple,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const FundingSourceListPage(),
+                          ),
+                        );
+                      },
+                    ),
+                    _buildModernMenuItem(
+                      context,
+                      title: 'Transfer Sumber Dana',
+                      icon: Icons.swap_horiz,
+                      color: Colors.deepOrange,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const FundingSourceTransferPage(),
+                          ),
+                        );
+                      },
+                    ),
                     const SizedBox(height: 10),
                     const Divider(),
                     const SizedBox(height: 10),
@@ -234,23 +269,24 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   ...wallets
                       .where((w) => w.isActive)
                       .map<DropdownMenuItem<Wallet>>((Wallet wallet) {
-                    return DropdownMenuItem<Wallet>(
-                      value: wallet,
-                      child: Row(
-                        children: [
-                          Icon(
-                            wallet.isMonthly
-                                ? Icons.account_balance_wallet
-                                : Icons.savings,
-                            color: Colors.teal,
-                            size: 18,
+                        return DropdownMenuItem<Wallet>(
+                          value: wallet,
+                          child: Row(
+                            children: [
+                              Icon(
+                                wallet.isMonthly
+                                    ? Icons.account_balance_wallet
+                                    : Icons.savings,
+                                color: Colors.teal,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(wallet.name),
+                            ],
                           ),
-                          const SizedBox(width: 8),
-                          Text(wallet.name),
-                        ],
-                      ),
-                    );
-                  }).toList(),
+                        );
+                      })
+                      .toList(),
                 ],
               ),
             );
@@ -272,6 +308,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           ref.invalidate(dashboardChartProvider);
           ref.invalidate(monthlyChartProvider);
           ref.invalidate(walletListProvider); // Refresh wallet juga
+          ref.invalidate(fundingSourceListProvider);
+          ref.invalidate(fundingSourceBalancesProvider);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -282,7 +320,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               children: [
                 const SizedBox(height: 10),
 
-                // --- CAROUSEL (2 HALAMAN) ---
+                // --- CAROUSEL (3 HALAMAN) ---
                 SizedBox(
                   height: 220,
                   child: PageView(
@@ -293,7 +331,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       });
                     },
                     children: [
-                      // HALAMAN 1: TOTAL SALDO
+                      // HALAMAN 1: SALDO SUMBER DANA (UNGU - SWIPE KE KANAN DARI DEFAULT)
+                      const FundingSourcesCard(),
+
+                      // HALAMAN 2 (DEFAULT): TOTAL SALDO (TEAL)
                       summaryState.when(
                         data: (data) => SummaryCard(
                           totalBalance: data['total'] ?? 0,
@@ -305,7 +346,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                         error: (err, _) => Center(child: Text('Error: $err')),
                       ),
 
-                      // HALAMAN 2: PIE CHART
+                      // HALAMAN 3: PIE CHART
                       Consumer(
                         builder: (context, ref, child) {
                           final chartData = ref.watch(dashboardChartProvider);
@@ -328,10 +369,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
                 const SizedBox(height: 12),
 
-                // DOTS INDICATOR (2 TITIK)
+                // DOTS INDICATOR (3 TITIK)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(2, (index) {
+                  children: List.generate(3, (index) {
                     return AnimatedContainer(
                       duration: const Duration(milliseconds: 300),
                       margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -339,7 +380,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       width: _currentPage == index ? 24 : 8,
                       decoration: BoxDecoration(
                         color: _currentPage == index
-                            ? Colors.teal
+                            ? (_currentPage == 0 ? Colors.purple : Colors.teal)
                             : Colors.grey.shade300,
                         borderRadius: BorderRadius.circular(4),
                       ),
@@ -989,14 +1030,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         );
 
         if (confirm == true) {
-          await DatabaseHelper.instance.closeForRestore();
+          // 1. Jalankan proses restore database secara aman
+          await DatabaseHelper.instance.restoreDatabase(backupFile);
 
-          final dbPath = await DatabaseHelper.instance.getDbPath();
-          await backupFile.copy(dbPath);
-
+          // 2. Muat ulang wallet awal dan refresh seluruh provider
+          await ref.read(selectedWalletProvider.notifier).loadInitial();
+          ref.invalidate(walletListProvider);
+          ref.invalidate(categoryListProvider);
           ref.invalidate(transactionListProvider);
           ref.invalidate(dashboardSummaryProvider);
-          ref.invalidate(categoryListProvider);
+          ref.invalidate(fundingSourceListProvider);
+          ref.invalidate(fundingSourceBalancesProvider);
+          ref.invalidate(fundingSourceTransferListProvider);
 
           if (mounted) {
             Navigator.pop(context);

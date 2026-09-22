@@ -6,9 +6,11 @@ import 'package:intl/intl.dart';
 
 import '../../domain/entities/category.dart';
 import '../../domain/entities/transaction.dart' as entity;
+import '../../domain/entities/funding_source.dart';
 import '../providers/category_provider.dart';
 import '../providers/transaction_provider.dart';
 import '../providers/wallet_provider.dart'; // PERBAIKAN: Import ditambahkan
+import '../providers/funding_source_provider.dart';
 import '../providers/flex_budget_provider.dart';
 import '../../core/utils/app_icons.dart';
 
@@ -37,6 +39,8 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
   int? _splitOverflowAmount;
   bool _isCategoryInitialized = false;
   bool _isAmountFocused = false;
+  FundingSource? _selectedFundingSource;
+  bool _isFundingSourceInitialized = false;
 
   @override
   void initState() {
@@ -122,6 +126,13 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
         return;
       }
 
+      if (_selectedFundingSource == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pilih sumber dana terlebih dahulu!')),
+        );
+        return;
+      }
+
       final title = _titleController.text;
       final amountStr = _amountController.text.replaceAll('.', '');
       final amount = int.tryParse(amountStr) ?? 0;
@@ -137,7 +148,11 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
       if (_overflowCategory != null &&
           _splitMainAmount != null &&
           _splitOverflowAmount != null) {
-        await _saveSplitTransactions(title, _splitMainAmount!, _splitOverflowAmount!);
+        await _saveSplitTransactions(
+          title,
+          _splitMainAmount!,
+          _splitOverflowAmount!,
+        );
         return;
       }
 
@@ -211,7 +226,20 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
       }
     }
 
-    if (balanceAfterTransaction < 0 || isOverCategory) {
+    // 3. CEK SALDO SUMBER DANA (Tunai/Rekening)
+    bool isFundingSourceInsufficient = false;
+    int fundingSourceBalance = 0;
+    if (_type == 'expense' && _selectedFundingSource != null) {
+      final balances = await ref.read(fundingSourceBalancesProvider.future);
+      fundingSourceBalance = balances[_selectedFundingSource!.id] ?? 0;
+      if (newAmount > fundingSourceBalance) {
+        isFundingSourceInsufficient = true;
+      }
+    }
+
+    if (balanceAfterTransaction < 0 ||
+        isOverCategory ||
+        isFundingSourceInsufficient) {
       return await showDialog<bool>(
             context: context,
             builder: (ctx) => AlertDialog(
@@ -228,7 +256,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                 children: [
                   if (balanceAfterTransaction < 0) ...[
                     const Text(
-                      '⚠️ SISA SALDO TIDAK CUKUP!',
+                      'âš ï¸ SISA SALDO TIDAK CUKUP!',
                       style: TextStyle(
                         color: Colors.red,
                         fontWeight: FontWeight.bold,
@@ -243,11 +271,25 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                   ],
                   if (isOverCategory) ...[
                     Text(
-                      '⚠️ $categoryWarning',
+                      'âš ï¸ $categoryWarning',
                       style: TextStyle(
                         color: Colors.orange[800],
                         fontWeight: FontWeight.bold,
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  if (isFundingSourceInsufficient) ...[
+                    Text(
+                      'âš ï¸ Saldo ${_selectedFundingSource!.name} tidak cukup!',
+                      style: TextStyle(
+                        color: Colors.orange[800],
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Saldo ${_selectedFundingSource!.name}: ${_formatRupiah(fundingSourceBalance)}',
                     ),
                     const SizedBox(height: 8),
                   ],
@@ -286,6 +328,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
           type: _type,
           categoryId: _selectedCategory!.id!,
           date: _selectedDate,
+          fundingSourceId: _selectedFundingSource!.id!,
         );
         await ref
             .read(transactionListProvider.notifier)
@@ -298,6 +341,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
           type: _type,
           categoryId: _selectedCategory!.id!,
           date: _selectedDate,
+          fundingSourceId: _selectedFundingSource!.id!,
         );
         await ref
             .read(transactionListProvider.notifier)
@@ -325,6 +369,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
         type: 'expense',
         categoryId: _selectedCategory!.id!,
         date: _selectedDate,
+        fundingSourceId: _selectedFundingSource!.id!,
       );
       await ref.read(transactionListProvider.notifier).addTransaction(t1);
 
@@ -334,6 +379,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
         type: 'expense',
         categoryId: _overflowCategory!.id!,
         date: _selectedDate,
+        fundingSourceId: _selectedFundingSource!.id!,
       );
       await ref.read(transactionListProvider.notifier).addTransaction(t2);
 
@@ -410,9 +456,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: (remaining >= 0
-                                    ? Colors.green
-                                    : Colors.red)
+                            color: (remaining >= 0 ? Colors.green : Colors.red)
                                 .withOpacity(0.12),
                             borderRadius: BorderRadius.circular(6),
                           ),
@@ -433,10 +477,11 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: (flexBudgetRemaining >= 0
-                                    ? Colors.teal
-                                    : Colors.orange)
-                                .withOpacity(0.12),
+                            color:
+                                (flexBudgetRemaining >= 0
+                                        ? Colors.teal
+                                        : Colors.orange)
+                                    .withOpacity(0.12),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -479,11 +524,15 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
     final sign = value < 0 ? '-' : '';
     if (abs >= 1000000) {
       final double val = abs / 1000000;
-      final formatted = val.toStringAsFixed(val.truncateToDouble() == val ? 0 : 1);
+      final formatted = val.toStringAsFixed(
+        val.truncateToDouble() == val ? 0 : 1,
+      );
       return '$sign${formatted}jt';
     } else if (abs >= 1000) {
       final double val = abs / 1000;
-      final formatted = val.toStringAsFixed(val.truncateToDouble() == val ? 0 : 1);
+      final formatted = val.toStringAsFixed(
+        val.truncateToDouble() == val ? 0 : 1,
+      );
       return '$sign${formatted}k';
     } else {
       return '$sign$abs';
@@ -613,8 +662,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                               String? remainingLabel;
                               Color? remainingColor;
                               if (_type == 'expense' && cat.budget > 0) {
-                                final spent =
-                                    categorySpentMap[cat.id] ?? 0;
+                                final spent = categorySpentMap[cat.id] ?? 0;
                                 final remaining = cat.budget - spent;
                                 remainingColor = remaining >= 0
                                     ? Colors.green[700]
@@ -631,20 +679,20 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                                   if (amount > 0 &&
                                       cat.budget > 0 &&
                                       _type == 'expense') {
-                                    final spent =
-                                        categorySpentMap[cat.id] ?? 0;
+                                    final spent = categorySpentMap[cat.id] ?? 0;
                                     final remaining = cat.budget - spent;
                                     if (remaining > 0 && amount > remaining) {
                                       final overflow = amount - remaining;
                                       final overflowCat =
                                           await _showOverflowCategoryDialog(
-                                        pageContext: pageContext,
-                                        overflowAmount: overflow,
-                                        mainCategory: cat,
-                                        allExpenseCategories: filtered,
-                                        categorySpentMap: categorySpentMap,
-                                        flexBudgetRemaining: flexBudget.remaining,
-                                      );
+                                            pageContext: pageContext,
+                                            overflowAmount: overflow,
+                                            mainCategory: cat,
+                                            allExpenseCategories: filtered,
+                                            categorySpentMap: categorySpentMap,
+                                            flexBudgetRemaining:
+                                                flexBudget.remaining,
+                                          );
                                       if (overflowCat != null) {
                                         setState(() {
                                           _selectedCategory = cat;
@@ -704,31 +752,34 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                     ),
-                                    if (remainingLabel != null) ...
-                                      [
-                                        const SizedBox(height: 4),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 6,
-                                            vertical: 2,
+                                    if (remainingLabel != null) ...[
+                                      const SizedBox(height: 4),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: remainingColor?.withOpacity(
+                                            0.12,
                                           ),
-                                          decoration: BoxDecoration(
-                                            color: remainingColor?.withOpacity(0.12),
-                                            borderRadius: BorderRadius.circular(6),
-                                          ),
-                                          child: Text(
-                                            remainingLabel,
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              fontSize: 9,
-                                              fontWeight: FontWeight.bold,
-                                              color: remainingColor,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
+                                          borderRadius: BorderRadius.circular(
+                                            6,
                                           ),
                                         ),
-                                      ],
+                                        child: Text(
+                                          remainingLabel,
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.bold,
+                                            color: remainingColor,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               );
@@ -769,6 +820,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
   @override
   Widget build(BuildContext context) {
     final categoryListState = ref.watch(categoryListProvider);
+    final fundingSourceListState = ref.watch(fundingSourceListProvider);
     final isEditMode = widget.transactionToEdit != null;
 
     categoryListState.whenData((categories) {
@@ -788,6 +840,48 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
               });
           });
         } catch (_) {}
+      }
+    });
+
+    fundingSourceListState.whenData((fundingSources) {
+      final activeSources = fundingSources.where((fs) => fs.isActive).toList();
+      if (isEditMode &&
+          !_isFundingSourceInitialized &&
+          _selectedFundingSource == null) {
+        try {
+          final oldFundingSource = fundingSources.firstWhere(
+            (fs) => fs.id == widget.transactionToEdit!.fundingSourceId,
+          );
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _selectedFundingSource = oldFundingSource;
+                _isFundingSourceInitialized = true;
+              });
+            }
+          });
+        } catch (_) {
+          if (activeSources.isNotEmpty) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                setState(() {
+                  _selectedFundingSource = activeSources.first;
+                  _isFundingSourceInitialized = true;
+                });
+              }
+            });
+          }
+        }
+      } else if (!isEditMode &&
+          _selectedFundingSource == null &&
+          activeSources.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _selectedFundingSource == null) {
+            setState(() {
+              _selectedFundingSource = activeSources.first;
+            });
+          }
+        });
       }
     });
 
@@ -930,7 +1024,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                                     _overflowCategory != null
                                         ? '${_selectedCategory!.name}  +  ${_overflowCategory!.name}'
                                         : (_selectedCategory?.name ??
-                                            'Pilih Kategori'),
+                                              'Pilih Kategori'),
                                     style: TextStyle(
                                       fontSize: 16,
                                       color: _selectedCategory == null
@@ -940,7 +1034,7 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                                   ),
                                   if (_overflowCategory != null &&
                                       _splitMainAmount != null &&
-                                      _splitOverflowAmount != null) ...[  
+                                      _splitOverflowAmount != null) ...[
                                     const SizedBox(height: 2),
                                     Text(
                                       '${_formatRupiah(_splitMainAmount!)}  &  ${_formatRupiah(_splitOverflowAmount!)}',
@@ -953,8 +1047,8 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                                 ],
                               ),
                             ),
-                            if (_selectedCategory != null) ...[  
-                              if (_overflowCategory != null) ...[  
+                            if (_selectedCategory != null) ...[
+                              if (_overflowCategory != null) ...[
                                 Icon(
                                   AppIcons.getIcon(_selectedCategory!.icon),
                                   color: Color(_selectedCategory!.color),
@@ -982,6 +1076,33 @@ class _AddTransactionPageState extends ConsumerState<AddTransactionPage> {
                           ],
                         ),
                       ),
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<FundingSource>(
+                      value: _selectedFundingSource,
+                      decoration: InputDecoration(
+                        labelText: 'Sumber Dana',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        prefixIcon: const Icon(Icons.account_balance_wallet),
+                      ),
+                      items: (fundingSourceListState.value ?? [])
+                          .where((fs) => fs.isActive)
+                          .map(
+                            (fs) => DropdownMenuItem(
+                              value: fs,
+                              child: Text(fs.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedFundingSource = value;
+                        });
+                      },
+                      validator: (value) =>
+                          value == null ? 'Pilih sumber dana' : null,
                     ),
                     const SizedBox(height: 16),
                     InkWell(
